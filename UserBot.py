@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 import sqlite3
 
 DB_FILE = "catalog.db"
-BOT_TOKEN = "8678627934:AAG9c3Jm694EzBLCBEqcoGGnQfSou3uslaY" # Replace with your actual token
+BOT_TOKEN = "YOUR_USER_BOT_TOKEN_HERE"
 
 # In-memory storage for user wishlists: { user_id: [product_id, ...] }
 wishlists = {}
@@ -309,7 +309,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Interactive help responses
         help_responses = {
             "help_buy": "🛒 <b>How to Buy</b>\n\n1. Use /market or the button.\n2. Choose a category.\n3. Click on a product to see details.\n4. Add it to your wishlist! ❤️",
-            "help_search": "🔍 <b>How to Search</b>\n\nYou can search in due modi:\n1. Click 'Search Product' and type a name.\n2. Simply type any product name (e.g., 'Mela') at any time!",
+            "help_search": "🔍 <b>How to Search</b>\n\nYou can search in two ways:\n1. Click 'Search Product' and type a name.\n2. Simply type any product name (e.g., 'Apple') at any time!",
             "help_wishlist": "❤️ <b>Wishlist Info</b>\n\nYour wishlist stores items you like. It automatically calculates the <b>total cost</b>, including any active discounts! 🔥"
         }
         text = help_responses.get(data, "Unknown help topic.")

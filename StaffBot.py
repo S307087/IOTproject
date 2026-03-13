@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 DB_FILE = "catalog.db"
 # IMPORTANT: Put your Staff Bot Token here
-STAFF_BOT_TOKEN = "8668314574:AAGN3_UzpzlMmKeMRykgAnPAmdai0UlyX3A" 
+STAFF_BOT_TOKEN = "YOUR_STAFF_BOT_TOKEN_HERE"
 
 # Conversation states
 ID, NAME, PRICE, CATEGORY, SHELF = range(5)
@@ -344,7 +344,7 @@ async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def add_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         context.user_data['price'] = float(update.message.text.replace(',', '.'))
-        await update.message.reply_text("Enter the Category (e.g., Colazione):")
+        await update.message.reply_text("Enter the Category (e.g., Breakfast):")
         return CATEGORY
     except ValueError:
         await update.message.reply_text("Invalid price. Please enter a number (e.g., 4.99):")
