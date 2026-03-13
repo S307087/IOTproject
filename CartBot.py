@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 DB_FILE = "catalog.db"
 # IMPORTANT: Put your Cart Bot Token here
-CART_BOT_TOKEN = "YOUR_CART_BOT_TOKEN_HERE"
+CART_BOT_TOKEN = "8632483838:AAF9MMJ16v6U8JCNZDMwsOSUpjef6QJLvhw"
 
 MAIN_MENU_KBD = ReplyKeyboardMarkup(
     [["🔗 Connect User", "❤️ Show Wishlist"], ["🧾 Shopping List", "💳 Checkout QR"]],
