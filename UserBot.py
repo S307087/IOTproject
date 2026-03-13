@@ -1,8 +1,8 @@
 import json
 import logging
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
 # Enable logging
 logging.basicConfig(
@@ -18,6 +18,14 @@ BOT_TOKEN = "8678627934:AAG9c3Jm694EzBLCBEqcoGGnQfSou3uslaY" # Replace with your
 # In-memory storage for user wishlists: { user_id: [product_id, ...] }
 wishlists = {}
 
+# In-memory storage for search context: { user_id: query_text }
+search_queries = {}
+
+MAIN_MENU_KBD = ReplyKeyboardMarkup(
+    [["🛒 Browse Market", "🔍 Search Product"], ["❤️ My Wishlist"]],
+    resize_keyboard=True
+)
+
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row  # To access columns by name
@@ -26,9 +34,53 @@ def get_db_connection():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
-    await update.message.reply_html(
-        rf"Hi {user.mention_html()}! Welcome to the Market Bot. Use /market to browse products and /wishlist to view your wish list."
+    welcome_text = (
+        f"👋 <b>Hi {user.mention_html()}!</b>\n\n"
+        "Welcome to the <b>Market Bot</b>! 🛒✨\n\n"
+        "How can I help you today?\n"
+        "• Click <b>Browse Market</b> to see categories\n"
+        "• Click <b>Search Product</b> to find something specific\n"
+        "• Click <b>My Wishlist</b> to see your saved items\n\n"
+        "<i>Enjoy your shopping!</i>"
     )
+    await update.message.reply_html(welcome_text, reply_markup=MAIN_MENU_KBD)
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle menu button clicks."""
+    text = update.message.text
+    if text == "🛒 Browse Market":
+        await market(update, context)
+    elif text == "❤️ My Wishlist":
+        await view_wishlist(update, context)
+    elif text == "🔍 Search Product":
+        await update.message.reply_text("Type the name of the product you are looking for:")
+    else:
+        # Treat other text as search query
+        await search_products(update, context)
+
+async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Search for products by name."""
+    query_text = update.message.text
+    if len(query_text) < 2:
+        return # Ignore very short messages if they aren't commands
+        
+    conn = get_db_connection()
+    results = conn.execute(
+        "SELECT product_id, product_name, price, promotion FROM products WHERE product_name LIKE ? LIMIT 10", 
+        (f"%{query_text}%",)
+    ).fetchall()
+    conn.close()
+    
+    if not results:
+        await update.message.reply_text(f"No products found matching '{query_text}'. Try another name!")
+        return
+        
+    keyboard = []
+    for p in results:
+        promo_tag = f" 🔥 (-{p['promotion']}%)" if p['promotion'] > 0 else ""
+        keyboard.append([InlineKeyboardButton(f"{p['product_name']} (€{p['price']}){promo_tag}", callback_data=f"prod_{p['product_id']}")])
+    
+    await update.message.reply_text(f"Search results for '{query_text}':", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show market categories."""
@@ -45,6 +97,7 @@ async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{cat}_0")])  # Added page 0 suffix
 
     reply_markup = InlineKeyboardMarkup(keyboard)
+    # The persistent keyboard stays visible, so we just send the categories
     await update.message.reply_text("Please choose a category to browse:", reply_markup=reply_markup)
 
 async def view_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -80,7 +133,7 @@ async def view_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     conn.close()
             
     msg += f"\n<b>Total Cost:</b> €{total_cost:.2f}"
-    await update.message.reply_text(msg, parse_mode='HTML')
+    await update.message.reply_text(msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Parses Callback queries from inline keyboards."""
@@ -166,13 +219,47 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if user_id not in wishlists:
             wishlists[user_id] = []
             
+        conn = get_db_connection()
+        prod = conn.execute('SELECT product_name, category FROM products WHERE product_id = ?', (prod_id,)).fetchone()
+        conn.close()
+        
+        cat = prod['category'] if prod else "Other"
+        
+        keyboard = [
+            [InlineKeyboardButton(f"« Back to {cat}", callback_data=f"cat_{cat}_0")],
+            [InlineKeyboardButton("🛒 Market", callback_data="back_categories"), InlineKeyboardButton("❤️ Wishlist", callback_data="view_wish_inline")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         if prod_id not in wishlists[user_id]:
             wishlists[user_id].append(prod_id)
-            await query.edit_message_text(text="Added to your wishlist! ❤️\nUse /wishlist to view.")
+            await query.edit_message_text(text=f"✅ Added <b>{prod['product_name']}</b> to your wishlist! ❤️", parse_mode='HTML', reply_markup=reply_markup)
         else:
-            await query.edit_message_text(text="This product is already in your wishlist.")
+            await query.edit_message_text(text=f"ℹ️ <b>{prod['product_name']}</b> is already in your wishlist.", parse_mode='HTML', reply_markup=reply_markup)
 
-    elif data == "back_categories":
+    elif data == "back_categories" or data == "view_wish_inline":
+        if data == "view_wish_inline":
+             # We can't easily call view_wishlist here because it expects an Update with a certain format
+             # but we can just implement a simplified version or redirect
+             user_wishlist = wishlists.get(user_id, [])
+             if not user_wishlist:
+                 await query.edit_message_text("Your wishlist is empty!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data="back_categories")]]))
+                 return
+             
+             msg = "Your Wishlist ❤️:\n\n"
+             total = 0
+             conn = get_db_connection()
+             for item_id in user_wishlist:
+                 p = conn.execute('SELECT product_name, price, promotion FROM products WHERE product_id = ?', (item_id,)).fetchone()
+                 if p:
+                     price = p['price'] * (1 - p['promotion']/100)
+                     msg += f"- {p['product_name']} (€{price:.2f})\n"
+                     total += price
+             conn.close()
+             msg += f"\n<b>Total: €{total:.2f}</b>"
+             await query.edit_message_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data="back_categories")]]))
+             return
+
         conn = get_db_connection()
         categories = [row['category'] for row in conn.execute('SELECT DISTINCT category FROM products WHERE category IS NOT NULL').fetchall()]
         conn.close()
@@ -192,13 +279,28 @@ def main() -> None:
         
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Command handlers
+    # Register commands for the bot menu
+    from telegram import BotCommand
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("market", market))
     application.add_handler(CommandHandler("wishlist", view_wishlist))
     
     # Callback query handler for inline buttons
     application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Handle button clicks from the persistent menu
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # Set command list in the Telegram UI
+    async def set_commands(app):
+        await app.bot.set_my_commands([
+            BotCommand("start", "Start the bot"),
+            BotCommand("market", "Browse the market"),
+            BotCommand("wishlist", "View your wishlist")
+        ])
+    
+    # We can use post_init for this
+    application.post_init = set_commands
 
     # Run the bot until user presses Ctrl-C
     print("Bot is starting up...")
