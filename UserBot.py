@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 import sqlite3
 
 DB_FILE = "catalog.db"
-BOT_TOKEN = "YOUR_USER_BOT_TOKEN_HERE"
+BOT_TOKEN = "8678627934:AAG9c3Jm694EzBLCBEqcoGGnQfSou3uslaY"
 
 # In-memory storage for user wishlists: { user_id: [product_id, ...] }
 wishlists = {}

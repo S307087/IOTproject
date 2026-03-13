@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 DB_FILE = "catalog.db"
 # IMPORTANT: Put your Staff Bot Token here
-STAFF_BOT_TOKEN = "YOUR_STAFF_BOT_TOKEN_HERE"
+STAFF_BOT_TOKEN = "8668314574:AAGN3_UzpzlMmKeMRykgAnPAmdai0UlyX3A"
 
 # Conversation states
 ID, NAME, PRICE, CATEGORY, SHELF = range(5)
