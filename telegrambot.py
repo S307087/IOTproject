@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import requests
 
-# ================= CONFIGURAZIONE =================
+# ================= CONFIGURAZIONE ==================
 # INCOLLA QUI IL TUO TOKEN DI BOTFATHER
 TOKEN = "8546839361:AAEpKQvbAqUKA8-EkOHDFVJScO2Ri-dvnbI" 
 
