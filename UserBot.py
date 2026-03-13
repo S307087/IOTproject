@@ -22,7 +22,7 @@ wishlists = {}
 search_queries = {}
 
 MAIN_MENU_KBD = ReplyKeyboardMarkup(
-    [["🛒 Browse Market", "🔍 Search Product"], ["❤️ My Wishlist"]],
+    [["🛒 Browse Market", "🔍 Search Product"], ["❤️ My Wishlist", "❓ Help & Info"]],
     resize_keyboard=True
 )
 
@@ -48,21 +48,57 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle menu button clicks."""
     text = update.message.text
+    
+    # Reset search state on any valid menu button press
+    if text in ["🛒 Browse Market", "❤️ My Wishlist", "❓ Help & Info", "🔍 Search Product"]:
+        context.user_data['awaiting_search'] = False
+
     if text == "🛒 Browse Market":
         await market(update, context)
     elif text == "❤️ My Wishlist":
         await view_wishlist(update, context)
     elif text == "🔍 Search Product":
-        await update.message.reply_text("Type the name of the product you are looking for:")
-    else:
-        # Treat other text as search query
+        context.user_data['awaiting_search'] = True
+        await update.message.reply_text("🔍 <b>Search Mode Active</b>\n\nType the name of the product you are looking for, or click another menu button to cancel.", parse_mode='HTML')
+    elif text == "❓ Help & Info":
+        await help_command(update, context)
+    elif context.user_data.get('awaiting_search'):
+        # Only treat other text as search if explicitly awaiting search
         await search_products(update, context)
+    else:
+        # Unexpected text, suggest using the menu
+        await update.message.reply_text("Sorry, I didn't quite catch that. Please use the menu buttons below! 🛒")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show an interactive help menu."""
+    help_text = (
+        "❓ <b>Market Bot Help Menu</b>\n\n"
+        "Here are the available features:\n\n"
+        "🛒 <b>Market</b>: Browse categories and products.\n"
+        "🔍 <b>Search</b>: Find products by typing their name.\n"
+        "❤️ <b>Wishlist</b>: Save products you like and see the total cost.\n"
+        "🔥 <b>Promos</b>: Look for the '🔥' icon for special discounts!\n\n"
+        "Click a button below for more details on a specific feature:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("How to Buy? 🛒", callback_data="help_buy"),
+         InlineKeyboardButton("How to Search? 🔍", callback_data="help_search")],
+        [InlineKeyboardButton("Wishlist Info ❤️", callback_data="help_wishlist")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.message:
+        await update.message.reply_html(help_text, reply_markup=reply_markup)
+    else:
+        await update.callback_query.edit_message_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
 
 async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Search for products by name."""
     query_text = update.message.text
+    
     if len(query_text) < 2:
-        return # Ignore very short messages if they aren't commands
+        await update.message.reply_text("⚠️ <b>Query too short!</b>\nPlease type at least 2 characters to search.", parse_mode='HTML')
+        return
         
     conn = get_db_connection()
     results = conn.execute(
@@ -72,7 +108,7 @@ async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     conn.close()
     
     if not results:
-        await update.message.reply_text(f"No products found matching '{query_text}'. Try another name!")
+        await update.message.reply_text(f"❌ No products found matching '<b>{query_text}</b>'.\nTry another name or check your spelling!", parse_mode='HTML')
         return
         
     keyboard = []
@@ -80,7 +116,7 @@ async def search_products(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         promo_tag = f" 🔥 (-{p['promotion']}%)" if p['promotion'] > 0 else ""
         keyboard.append([InlineKeyboardButton(f"{p['product_name']} (€{p['price']}){promo_tag}", callback_data=f"prod_{p['product_id']}")])
     
-    await update.message.reply_text(f"Search results for '{query_text}':", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(f"✅ Found {len(results)} results for '<b>{query_text}</b>':", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
 
 async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show market categories."""
@@ -239,8 +275,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     elif data == "back_categories" or data == "view_wish_inline":
         if data == "view_wish_inline":
-             # We can't easily call view_wishlist here because it expects an Update with a certain format
-             # but we can just implement a simplified version or redirect
+             # Simplified wishlist view for inline button
              user_wishlist = wishlists.get(user_id, [])
              if not user_wishlist:
                  await query.edit_message_text("Your wishlist is empty!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data="back_categories")]]))
@@ -266,9 +301,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         keyboard = []
         for cat in categories:
-            keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{cat}_0")])  # Send to page 0
+            keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{cat}_0")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(text="Please choose a category:", reply_markup=reply_markup)
+
+    elif data.startswith("help_"):
+        # Interactive help responses
+        help_responses = {
+            "help_buy": "🛒 <b>How to Buy</b>\n\n1. Use /market or the button.\n2. Choose a category.\n3. Click on a product to see details.\n4. Add it to your wishlist! ❤️",
+            "help_search": "🔍 <b>How to Search</b>\n\nYou can search in due modi:\n1. Click 'Search Product' and type a name.\n2. Simply type any product name (e.g., 'Mela') at any time!",
+            "help_wishlist": "❤️ <b>Wishlist Info</b>\n\nYour wishlist stores items you like. It automatically calculates the <b>total cost</b>, including any active discounts! 🔥"
+        }
+        text = help_responses.get(data, "Unknown help topic.")
+        keyboard = [[InlineKeyboardButton("« Back to Help", callback_data="back_help")]]
+        await query.edit_message_text(text=text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data == "back_help":
+        await help_command(update, context)
 
 def main() -> None:
     """Start the bot."""
@@ -279,11 +328,11 @@ def main() -> None:
         
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Register commands for the bot menu
     from telegram import BotCommand
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("market", market))
     application.add_handler(CommandHandler("wishlist", view_wishlist))
+    application.add_handler(CommandHandler("help", help_command))
     
     # Callback query handler for inline buttons
     application.add_handler(CallbackQueryHandler(button_callback))
@@ -296,7 +345,8 @@ def main() -> None:
         await app.bot.set_my_commands([
             BotCommand("start", "Start the bot"),
             BotCommand("market", "Browse the market"),
-            BotCommand("wishlist", "View your wishlist")
+            BotCommand("wishlist", "View your wishlist"),
+            BotCommand("help", "How to use the bot")
         ])
     
     # We can use post_init for this

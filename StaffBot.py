@@ -67,27 +67,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # --- Helper for button presses ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text
+    
+    # Reset search state on any valid menu button press
+    if text in ["➕ Add Product", "📂 Browse Catalog", "🔍 Search Product", "📦 Quick View", "📈 Update Stock", "🔥 Manage Promo", "❌ Delete Product"]:
+        context.user_data['staff_awaiting_search'] = False
+
     if text == "➕ Add Product":
         return await add_start(update, context)
     elif text == "📂 Browse Catalog":
         return await browse_categories(update, context)
     elif text == "🔍 Search Product":
-        await update.message.reply_text("Type the name of the product you want to manage:")
+        context.user_data['staff_awaiting_search'] = True
+        await update.message.reply_html("🔍 <b>Search Mode Active (Staff)</b>\n\nType the product name to manage, or click another menu button to cancel.")
     elif text == "📦 Quick View":
-        await update.message.reply_text("Usage: /view <ID> or browse the catalog.")
+        await update.message.reply_text("Usage: /view <ID> or browse/search for a product.")
     elif text == "📈 Update Stock":
         await update.message.reply_text("Usage: /stock <ID> <shelf> <warehouse> or browse to a product.")
     elif text == "🔥 Manage Promo":
         await update.message.reply_text("Usage: /promo <ID> <%> or browse to a product.")
     elif text == "❌ Delete Product":
         await update.message.reply_text("Usage: /delete <ID> or browse to a product.")
+    elif context.user_data.get('staff_awaiting_search'):
+        # Only treat other text as search if explicitly awaiting search
+        await search_staff_products(update, context)
     else:
-        # Treat other text as search
-        if len(text) >= 2:
-            return await search_staff_products(update, context)
+        # Unexpected text, suggest using the menu
+        await update.message.reply_text("Admin, please use the menu buttons or commands for management. 🛠️")
 
 async def search_staff_products(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query_text = update.message.text
+    
+    if len(query_text) < 2:
+        await update.message.reply_html("⚠️ <b>Query too short!</b>\nPlease type at least 2 characters to search.")
+        return
+        
     conn = get_db_connection()
     results = conn.execute(
         "SELECT product_id, product_name, price, promotion FROM products WHERE product_name LIKE ? LIMIT 10", 
@@ -96,7 +109,7 @@ async def search_staff_products(update: Update, context: ContextTypes.DEFAULT_TY
     conn.close()
     
     if not results:
-        await update.message.reply_text(f"No products found matching '{query_text}'.")
+        await update.message.reply_html(f"❌ No products found matching '<b>{query_text}</b>'.")
         return
         
     keyboard = []
@@ -104,7 +117,7 @@ async def search_staff_products(update: Update, context: ContextTypes.DEFAULT_TY
         promo_tag = f" 🔥 (-{p['promotion']}%)" if p['promotion'] > 0 else ""
         keyboard.append([InlineKeyboardButton(f"{p['product_name']} [{p['product_id']}]{promo_tag}", callback_data=f"staff_prod_{p['product_id']}")])
     
-    await update.message.reply_text(f"Search results for '{query_text}':", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_html(f"✅ Found {len(results)} results for '<b>{query_text}</b>':", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # --- Browsing & Interaction ---
 
