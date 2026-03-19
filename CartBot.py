@@ -1,8 +1,10 @@
 import json
 import logging
 import sqlite3
+import asyncio
 from datetime import datetime, timezone
 
+from smartmarket_MQTT import MyMQTT
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -24,9 +26,80 @@ DB_FILE = "catalog.db"
 CART_BOT_TOKEN = "8632483838:AAF9MMJ16v6U8JCNZDMwsOSUpjef6QJLvhw"
 
 MAIN_MENU_KBD = ReplyKeyboardMarkup(
-    [["🔗 Connect User", "❤️ Show Wishlist"], ["🧾 Shopping List", "💳 Checkout QR"]],
+    [["⚙️ Set Cart ID", "💳 Show Pairing Code"], ["❤️ Show Wishlist", "🧾 Shopping List"], ["🚪 Disconnect"]],
     resize_keyboard=True,
 )
+
+event_loop = None
+
+class CartNotifier:
+    def __init__(self):
+        self.app = None
+        self.chat_id = None
+        
+    def notify(self, topic, payload):
+        if not self.app or not self.chat_id or not event_loop:
+            return
+        if not payload:
+            return
+            
+        event = payload.get("event")
+        if event in ["user_connected", "wishlist_updated"]:
+            user_id = payload.get("user_id")
+            user_name = payload.get("user_name", "User")
+            wish_list = payload.get("wish_list", [])
+            
+            if event == "user_connected":
+                header = f"✅ <b>Connection Established!</b>\nWelcome <b>{user_name}</b> (<code>{user_id}</code>) to this cart.\n\n"
+            else:
+                header = f"🔔 <b>Wishlist Update</b>\nUser <b>{user_name}</b> updated their wishlist.\n\n"
+                
+            msg = header
+            if wish_list:
+                msg += "❤️ <b>Current Wishlist:</b>\n"
+                conn = get_db_connection()
+                
+                # Try to get cart_id to handle strikethrough logic correctly
+                cart_id = self.app.bot_data.get("cart_id") if self.app else None
+                shopping_ids = []
+                if cart_id:
+                     row = conn.execute("SELECT shopping_list FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+                     if row and row['shopping_list']:
+                         shopping_ids = _load_json_list(row['shopping_list'])
+                     
+                products = conn.execute(f"SELECT product_id, product_name, price, promotion FROM products WHERE product_id IN ({','.join(['?']*len(wish_list))})", wish_list).fetchall()
+                conn.close()
+                for p in products:
+                    promo = int(p["promotion"] or 0)
+                    price = float(p["price"] or 0.0)
+                    final_price = price * (1 - promo / 100)
+                    
+                    is_scanned = p['product_id'] in shopping_ids
+                    line = f"- <s>{p['product_name']}</s>" if is_scanned else f"- {p['product_name']}"
+                    line += f" [<code>{p['product_id']}</code>]"
+                    
+                    if promo > 0:
+                        line += f" <s>€{price:.2f}</s> €{final_price:.2f}"
+                    else:
+                        line += f" €{final_price:.2f}"
+                    
+                    msg += f"{line}\n"
+            else:
+                msg += "Wishlist is empty."
+                
+            asyncio.run_coroutine_threadsafe(
+                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML'),
+                event_loop
+            )
+        elif event == "user_disconnected":
+            msg = "🔌 <b>User Disconnected</b>\nThe cart has been reset and is ready for a new user."
+            asyncio.run_coroutine_threadsafe(
+                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
+                event_loop
+            )
+
+notifier = CartNotifier()
+mqtt_client = MyMQTT("CartBotClient", "localhost", 1883, notifier=notifier)
 
 
 def get_db_connection():
@@ -54,75 +127,127 @@ def _save_json_list(items: list[str]) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global event_loop
+    # capture the running loop so the MQTT thread can schedule coroutines
+    if event_loop is None:
+        event_loop = asyncio.get_running_loop()
+    
+    # Store app and chat_id in notifier so it can send messages to this chat
+    notifier.app = context.application
+    notifier.chat_id = update.effective_chat.id
+    
     await update.message.reply_text(
         "🛒 Smart Cart Bot\n\n"
         "This bot represents a smart shopping cart.\n"
-        "Use the menu to connect a user, view the wishlist, build the shopping list, and generate a checkout QR payload.",
+        "Use ⚙️ Set Cart ID to define this cart's ID, then use 💳 Show Pairing Code to let a user pair.",
         reply_markup=MAIN_MENU_KBD,
     )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text
-    if text == "🔗 Connect User":
-        context.user_data["awaiting_user_id"] = True
-        await update.message.reply_text("Send the User ID to connect (e.g., USR-001).")
+    if text == "⚙️ Set Cart ID":
+        context.user_data["awaiting_set_cart_id"] = True
+        await update.message.reply_text("Enter the Cart ID this bot represents (e.g. CRT-001).")
         return
 
-    if context.user_data.get("awaiting_user_id"):
-        context.user_data["awaiting_user_id"] = False
-        await connect(update, context, user_id=text.strip().upper())
+    if context.user_data.get("awaiting_set_cart_id"):
+        context.user_data["awaiting_set_cart_id"] = False
+        cart_id = text.strip().upper()
+        
+        # Subscribe to MQTT
+        old_cart = context.bot_data.get("cart_id")
+        if old_cart:
+            mqtt_client.myUnsubscribe(f"cart/{old_cart}/data")
+            
+        context.bot_data["cart_id"] = cart_id
+        mqtt_client.mySubscribe(f"cart/{cart_id}/data")
+        
+        await update.message.reply_text(f"✅ Active Cart set to: {cart_id}", reply_markup=MAIN_MENU_KBD)
+        return
+
+    if text == "💳 Show Pairing Code":
+        cart_id = context.bot_data.get("cart_id")
+        if not cart_id:
+            await update.message.reply_text("Cart ID not set! Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
+            return
+            
+        # Deep link URL for the UserBot (UsersMarketBot)
+        # Scan with phone -> opens telegram -> sends /start CRT-XXX
+        deep_link = f"https://t.me/UsersMarketBot?start={cart_id}"
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={deep_link}"
+        
+        await update.message.reply_photo(
+            photo=qr_url, 
+            caption=(
+                f"🔑 <b>Cart Pairing QR Code</b>\n\n"
+                f"Code: <code>{cart_id}</code>\n\n"
+                f"📸 <b>Scan this with your phone camera</b> to connect directly, or manually type the code in the User Bot."
+            ), 
+            parse_mode='HTML', 
+            reply_markup=MAIN_MENU_KBD
+        )
         return
 
     if text == "❤️ Show Wishlist":
         await show_wishlist(update, context)
     elif text == "🧾 Shopping List":
         await show_shopping_list(update, context)
-    elif text == "💳 Checkout QR":
-        await checkout_qr(update, context)
+    elif text == "🚪 Disconnect":
+        await disconnect_cart(update, context)
     else:
         await update.message.reply_text("Please use the menu buttons.", reply_markup=MAIN_MENU_KBD)
 
-
-async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: str | None = None) -> None:
-    if not user_id and context.args:
-        user_id = context.args[0].strip().upper()
-    if not user_id:
-        await update.message.reply_text("Usage: /connect <USER_ID>")
+async def disconnect_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    cart_id = context.bot_data.get("cart_id")
+    if not cart_id:
+        await update.message.reply_text("No cart connected.", reply_markup=MAIN_MENU_KBD)
         return
-
-    cart_id = f"CRT-{user_id.split('-')[-1].zfill(3)}"
+    
     conn = get_db_connection()
+    cart_row = conn.execute("SELECT user_id FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+    user_id = cart_row["user_id"] if cart_row else None
+    
+    if user_id:
+        conn.execute("UPDATE users SET cart_id = NULL WHERE user_id = ?", (user_id,))
+    
+    # Restore shelf stock for all items in the shopping list
+    cart_row = conn.execute("SELECT shopping_list FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+    if cart_row and cart_row["shopping_list"]:
+        items = _load_json_list(cart_row["shopping_list"])
+        for item_id in items:
+            conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (item_id,))
 
-    conn.execute(
-        "INSERT OR IGNORE INTO users (user_id, cart_id, wish_list) VALUES (?, ?, ?)",
-        (user_id, cart_id, "[]"),
-    )
-    conn.execute(
-        "INSERT OR IGNORE INTO carts (cart_id, user_id, shopping_list, connection_time) VALUES (?, ?, ?, ?)",
-        (cart_id, user_id, "[]", _utc_now_iso()),
-    )
-    conn.execute("UPDATE users SET cart_id = ? WHERE user_id = ?", (cart_id, user_id))
-    conn.execute("UPDATE carts SET user_id = ? WHERE cart_id = ?", (user_id, cart_id))
-
+    conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
     conn.commit()
     conn.close()
-
-    context.user_data["user_id"] = user_id
-    context.user_data["cart_id"] = cart_id
-
-    await update.message.reply_text(f"✅ Connected to user {user_id} on cart {cart_id}.", reply_markup=MAIN_MENU_KBD)
+    
+    # Send MQTT
+    try:
+        payload = {"event": "user_disconnected", "cart_id": cart_id, "user_id": user_id}
+        mqtt_client.myPublish(f"cart/{cart_id}/data", payload)
+    except Exception:
+        pass
+    
+    await update.message.reply_text("🔌 Disconnected! The cart has been reset and all items returned to stock. The user's wishlist was preserved.", reply_markup=MAIN_MENU_KBD)
 
 
 async def show_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = context.user_data.get("user_id")
-    if not user_id:
-        await update.message.reply_text("No user connected. Use 'Connect User' first.", reply_markup=MAIN_MENU_KBD)
+    cart_id = context.bot_data.get("cart_id")
+    if not cart_id:
+        await update.message.reply_text("Cart ID not set. Use 'Set Cart ID' first.", reply_markup=MAIN_MENU_KBD)
         return
 
     conn = get_db_connection()
-    row = conn.execute("SELECT wish_list FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT wish_list, shopping_list, user_id FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+    
+    if not row or not row["user_id"]:
+        conn.close()
+        await update.message.reply_text("No user is connected to this cart.", reply_markup=MAIN_MENU_KBD)
+        return
+        
     wishlist_ids = _load_json_list(row["wish_list"] if row else None)
+    shopping_ids = _load_json_list(row["shopping_list"] if row else None)
 
     if not wishlist_ids:
         conn.close()
@@ -142,13 +267,21 @@ async def show_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         price = float(p["price"] or 0.0)
         final_price = price * (1 - promo / 100)
         total += final_price
-        msg += f"- {p['product_name']} [{p['product_id']}] €{final_price:.2f}"
+        
+        is_scanned = p['product_id'] in shopping_ids
+        line = f"- <s>{p['product_name']}</s>" if is_scanned else f"- {p['product_name']}"
+        line += f" [<code>{p['product_id']}</code>]"
+        
         if promo > 0:
-            msg += f" (promo -{promo}%)"
-        msg += "\n"
+            line += f" <s>€{price:.2f}</s> €{final_price:.2f}"
+        else:
+            line += f" €{final_price:.2f}"
+            
+        msg += f"{line}\n"
+        
     msg += f"\nTotal (wishlist): €{total:.2f}"
 
-    await update.message.reply_text(msg, reply_markup=MAIN_MENU_KBD)
+    await update.message.reply_text(msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD)
 
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,10 +289,9 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     Simulates an RFID scan by product_id.
     Usage: /scan <PRODUCT_ID>
     """
-    user_id = context.user_data.get("user_id")
-    cart_id = context.user_data.get("cart_id")
-    if not user_id or not cart_id:
-        await update.message.reply_text("No user connected. Use /connect first.", reply_markup=MAIN_MENU_KBD)
+    cart_id = context.bot_data.get("cart_id")
+    if not cart_id:
+        await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
     if not context.args:
         await update.message.reply_text("Usage: /scan <PRODUCT_ID>")
@@ -169,12 +301,18 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     conn = get_db_connection()
     prod = conn.execute(
-        "SELECT product_id, product_name FROM products WHERE product_id = ?",
+        "SELECT product_id, product_name, shelf_stock FROM products WHERE product_id = ?",
         (product_id,),
     ).fetchone()
+    
     if not prod:
         conn.close()
         await update.message.reply_text(f"Product not found: {product_id}", reply_markup=MAIN_MENU_KBD)
+        return
+        
+    if prod["shelf_stock"] <= 0:
+        conn.close()
+        await update.message.reply_text(f"❌ Product {product_id} is out of stock on the shelf!", reply_markup=MAIN_MENU_KBD)
         return
 
     cart_row = conn.execute(
@@ -184,6 +322,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     shopping_list = _load_json_list(cart_row["shopping_list"] if cart_row else None)
     shopping_list.append(product_id)
 
+    conn.execute("UPDATE products SET shelf_stock = shelf_stock - 1 WHERE product_id = ?", (product_id,))
     conn.execute(
         "UPDATE carts SET shopping_list = ? WHERE cart_id = ?",
         (_save_json_list(shopping_list), cart_id),
@@ -192,15 +331,54 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn.close()
 
     await update.message.reply_text(
-        f"✅ Added to cart: {prod['product_name']} [{product_id}]",
+        f"✅ Added to cart: {prod['product_name']} [{product_id}] (Stock -1)",
+        reply_markup=MAIN_MENU_KBD,
+    )
+
+async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Simulates removing an item from the cart.
+    Usage: /unscan <PRODUCT_ID>
+    """
+    cart_id = context.bot_data.get("cart_id")
+    if not cart_id:
+        await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /unscan <PRODUCT_ID>")
+        return
+
+    product_id = context.args[0].strip().upper()
+
+    conn = get_db_connection()
+    cart_row = conn.execute("SELECT shopping_list FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+    shopping_list = _load_json_list(cart_row["shopping_list"] if cart_row else None)
+
+    if product_id not in shopping_list:
+        conn.close()
+        await update.message.reply_text(f"❌ Product {product_id} is not in your cart.", reply_markup=MAIN_MENU_KBD)
+        return
+
+    shopping_list.remove(product_id)
+
+    conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (product_id,))
+    conn.execute(
+        "UPDATE carts SET shopping_list = ? WHERE cart_id = ?",
+        (_save_json_list(shopping_list), cart_id),
+    )
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text(
+        f"✅ Removed from cart: [{product_id}] (Stock +1)",
         reply_markup=MAIN_MENU_KBD,
     )
 
 
 async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    cart_id = context.user_data.get("cart_id")
+    cart_id = context.bot_data.get("cart_id")
     if not cart_id:
-        await update.message.reply_text("No cart connected. Use 'Connect User' first.", reply_markup=MAIN_MENU_KBD)
+        await update.message.reply_text("No cart connected. Use 'Set Cart ID' first.", reply_markup=MAIN_MENU_KBD)
         return
 
     conn = get_db_connection()
@@ -234,9 +412,9 @@ async def checkout_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     Generates a QR payload (as text) containing cart_id and connection_time.
     In a real system you would encode this payload into an actual QR image.
     """
-    cart_id = context.user_data.get("cart_id")
+    cart_id = context.bot_data.get("cart_id")
     if not cart_id:
-        await update.message.reply_text("No cart connected. Use 'Connect User' first.", reply_markup=MAIN_MENU_KBD)
+        await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
 
     conn = get_db_connection()
@@ -273,11 +451,16 @@ def main() -> None:
     if CART_BOT_TOKEN == "YOUR_CART_BOT_TOKEN_HERE":
         print("WARNING: Replace CART_BOT_TOKEN with your unique token.")
 
+    try:
+        mqtt_client.start()
+    except Exception as e:
+        logger.error(f"Failed to start MQTT Client: {e}")
+
     application = ApplicationBuilder().token(CART_BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("connect", connect))
     application.add_handler(CommandHandler("scan", scan))
+    application.add_handler(CommandHandler("unscan", unscan))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(noop_callback, pattern=r"^noop$"))
 

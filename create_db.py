@@ -36,6 +36,7 @@ def create_db():
             cart_id TEXT PRIMARY KEY,
             user_id TEXT,
             shopping_list TEXT,         -- JSON list of product_ids
+            wish_list TEXT,             -- JSON list of product_ids from User
             connection_time TEXT
         )
         '''
@@ -327,17 +328,17 @@ def create_db():
         '''
         INSERT OR REPLACE INTO users (user_id, cart_id, wish_list)
         VALUES
-            ('USR-001', 'CRT-001', '["FRU-0002", "BRK-1003", "SNK-4003"]'),
-            ('USR-002', 'CRT-002', '["HYG-2002", "BEV-3002"]')
+            ('USR-001', NULL, '["FRU-0002", "BRK-1003", "SNK-4003"]'),
+            ('USR-002', NULL, '["HYG-2002", "BEV-3002"]')
         '''
     )
 
+    carts_values = ",\n            ".join([f"('CRT-{str(i).zfill(3)}', NULL, '[]', '[]', NULL)" for i in range(1, 16)])
     cursor.execute(
-        '''
-        INSERT OR REPLACE INTO carts (cart_id, user_id, shopping_list, connection_time)
+        f'''
+        INSERT OR REPLACE INTO carts (cart_id, user_id, shopping_list, wish_list, connection_time)
         VALUES
-            ('CRT-001', 'USR-001', '["FRU-0001", "BRK-1001", "BEV-3001"]', '2026-03-13T10:15:00Z'),
-            ('CRT-002', 'USR-002', '["HYG-2003", "FRZ-5001"]', '2026-03-13T11:05:00Z')
+            {carts_values}
         '''
     )
 
