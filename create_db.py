@@ -1,7 +1,8 @@
 import sqlite3
 import os
 
-DB_FILENAME = 'catalog.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILENAME = os.path.join(BASE_DIR, 'catalog.db')
 
 def create_db():
     # Remove existing db to start fresh if we run this multiple times
@@ -370,14 +371,7 @@ def create_db():
         '''
     )
 
-    cursor.execute(
-        '''
-        INSERT OR REPLACE INTO transactions (payment_id, user_id, total_amount, product_list, dwell_time_seconds)
-        VALUES
-            ('PAY-0001', 'USR-001', 12.35, '["FRU-0001", "BRK-1001", "BEV-3001"]', 1800),
-            ('PAY-0002', 'USR-002', 9.87, '["HYG-2003", "FRZ-5001"]', 2200)
-        '''
-    )
+    cursor.execute('DELETE FROM transactions')
 
     cursor.execute(
         '''

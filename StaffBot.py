@@ -1,5 +1,8 @@
 import logging
 import sqlite3
+import requests
+import json
+import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -10,6 +13,14 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
+from smartmarket_MQTT import MyMQTT
+
+class StaffNotifier:
+    def notify(self, topic, payload):
+        pass
+
+notifier = StaffNotifier()
+mqtt_client = MyMQTT("StaffBotClient", "localhost", 1883, notifier=notifier)
 
 # Enable logging
 logging.basicConfig(
@@ -17,7 +28,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_FILE = "catalog.db"
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "catalog.db")
 # IMPORTANT: Put your Staff Bot Token here
 STAFF_BOT_TOKEN = "8668314574:AAGN3_UzpzlMmKeMRykgAnPAmdai0UlyX3A"
 
@@ -36,6 +49,13 @@ def get_db_connection():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
+    if context.args:
+        param = context.args[0].upper()
+        if param.startswith("CHK-"):
+            cart_id = param.replace("CHK-", "")
+            await finalize_checkout(cart_id, update, context)
+            return
+
     reply_keyboard = [
         ["📂 Browse Catalog", "🔍 Search Product"],
         ["➕ Add Product", "📦 Quick View"],
@@ -457,8 +477,107 @@ async def view_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     else:
         await update.message.reply_text(f"❓ Product {pid} not found.")
 
+
+
+async def finalize_checkout(cart_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    conn = get_db_connection()
+    row = conn.execute(
+        "SELECT user_id, shopping_list, connection_time FROM carts WHERE cart_id = ?",
+        (cart_id,)
+    ).fetchone()
+    
+    if not row or not row["user_id"]:
+        conn.close()
+        await update.message.reply_text(f"❌ Cannot complete checkout: cart {cart_id} is not associated with any user or does not exist.")
+        return
+        
+    user_id = row["user_id"]
+    shopping_list_json = row["shopping_list"]
+    
+    shopping_list = []
+    try:
+        shopping_list = json.loads(shopping_list_json)
+    except Exception:
+        pass
+        
+    if not shopping_list:
+        conn.close()
+        await update.message.reply_text(f"❌ Cart {cart_id} is empty.")
+        return
+        
+    # Calculate Total correctly accounting for duplicate items in shopping_list
+    products = conn.execute(
+        f"SELECT product_id, price, promotion FROM products WHERE product_id IN ({','.join(['?'] * len(shopping_list))})",
+        shopping_list
+    ).fetchall()
+    
+    prod_dict = {p["product_id"]: p for p in products}
+
+    total_amount = 0.0
+    for pid in shopping_list:
+        p = prod_dict.get(pid)
+        if p:
+            promo = int(p["promotion"] or 0)
+            price = float(p["price"] or 0.0)
+            final_price = price * (1 - promo / 100)
+            total_amount += final_price
+        
+    # Generate payment ID
+    payment_id = f"PAY-{int(datetime.datetime.now().timestamp())}"
+    
+    dwell_time = 0
+    if row["connection_time"]:
+        try:
+            ct = row["connection_time"].replace("Z", "+00:00")
+            conn_time = datetime.datetime.fromisoformat(ct)
+            if conn_time.tzinfo is None:
+                dwell_time = int((datetime.datetime.now() - conn_time).total_seconds())
+            else:
+                dwell_time = int((datetime.datetime.now(datetime.timezone.utc) - conn_time).total_seconds())
+        except Exception as e:
+            logger.error(f"Time parsing error: {e}")
+            pass
+            
+    # Insert Transaction
+    conn.execute(
+        '''
+        INSERT INTO transactions (payment_id, user_id, total_amount, product_list, dwell_time_seconds)
+        VALUES (?, ?, ?, ?, ?)
+        ''',
+        (payment_id, user_id, total_amount, shopping_list_json, dwell_time)
+    )
+    
+    # Empty Cart
+    conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
+    
+    # Unlink User
+    conn.execute("UPDATE users SET cart_id=NULL WHERE user_id=?", (user_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    # Notify via MQTT
+    try:
+        payload = {
+            "event": "checkout_complete",
+            "payment_id": payment_id,
+            "total": total_amount,
+            "user_id": user_id
+        }
+        mqtt_client.myPublish(f"cart/{cart_id}/data", payload)
+    except Exception as e:
+        logger.error(f"MQTT Publish error: {e}")
+        
+    await update.message.reply_text(f"✅ Payment registered successfully!\nTransaction: {payment_id}\nTotal: €{total_amount:.2f}\nUser disconnected and cart emptied.")
+
 def main() -> None:
     """Start the bot."""
+    
+    try:
+        mqtt_client.start()
+    except Exception as e:
+        logger.error(f"Failed to start MQTT Client: {e}")
+        
     if STAFF_BOT_TOKEN == "YOUR_STAFF_BOT_TOKEN_HERE":
         print("WARNING: Replace STAFF_BOT_TOKEN with your unique token.")
         

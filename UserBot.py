@@ -15,7 +15,9 @@ import sqlite3
 from smartmarket_MQTT import MyMQTT
 import requests
 
-DB_FILE = "catalog.db"
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "catalog.db")
 BOT_TOKEN = "8678627934:AAG9c3Jm694EzBLCBEqcoGGnQfSou3uslaY"
 
 # In-memory storage for search context: { user_id: query_text }
@@ -31,9 +33,23 @@ class UserNotifier:
             return
             
         event = payload.get("event")
-        if event == "user_disconnected":
+        asyncio_run = getattr(asyncio, "run_coroutine_threadsafe")
+        
+        if event == "checkout_complete":
+            payment_id = payload.get("payment_id", "N/A")
+            total = payload.get("total", 0.0)
+            msg = (
+                f"🧾 <b>Payment Complete!</b>\n\n"
+                f"Transaction: <code>{payment_id}</code>\n"
+                f"Total Paid: <b>€{total:.2f}</b>\n\n"
+                f"Thank you for shopping with us! You have been disconnected from the cart."
+            )
+            asyncio_run(
+                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
+                event_loop
+            )
+        elif event == "user_disconnected":
             # The cart disconnected us
-            asyncio_run = getattr(asyncio, "run_coroutine_threadsafe")
             msg = "🔌 <b>Remote Disconnect</b>\nThe cart has been disconnected or reset. Your session has ended."
             asyncio_run(
                 self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),

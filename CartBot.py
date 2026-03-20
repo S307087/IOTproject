@@ -21,12 +21,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_FILE = "catalog.db"
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "catalog.db")
 # IMPORTANT: Put your Cart Bot Token here
 CART_BOT_TOKEN = "8632483838:AAF9MMJ16v6U8JCNZDMwsOSUpjef6QJLvhw"
 
 MAIN_MENU_KBD = ReplyKeyboardMarkup(
-    [["⚙️ Set Cart ID", "💳 Show Pairing Code"], ["❤️ Show Wishlist", "🧾 Shopping List"], ["🚪 Disconnect"]],
+    [["⚙️ Set Cart ID", "💳 Show Pairing Code"], ["❤️ Show Wishlist", "🧾 Shopping List"], ["🏁 Finish Shopping", "🚪 Disconnect"]],
     resize_keyboard=True,
 )
 
@@ -89,6 +91,12 @@ class CartNotifier:
                 
             asyncio.run_coroutine_threadsafe(
                 self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML'),
+                event_loop
+            )
+        elif event == "checkout_complete":
+            msg = "✅ <b>Checkout Complete!</b>\nPayment registered successfully. The cart is now free for a new user."
+            asyncio.run_coroutine_threadsafe(
+                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
                 event_loop
             )
         elif event == "user_disconnected":
@@ -193,6 +201,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_wishlist(update, context)
     elif text == "🧾 Shopping List":
         await show_shopping_list(update, context)
+    elif text == "🏁 Finish Shopping":
+        await checkout_qr(update, context)
     elif text == "🚪 Disconnect":
         await disconnect_cart(update, context)
     else:
@@ -409,8 +419,7 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def checkout_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Generates a QR payload (as text) containing cart_id and connection_time.
-    In a real system you would encode this payload into an actual QR image.
+    Generates a QR code for checkout that StaffBot can scan.
     """
     cart_id = context.bot_data.get("cart_id")
     if not cart_id:
@@ -419,26 +428,32 @@ async def checkout_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     conn = get_db_connection()
     row = conn.execute(
-        "SELECT cart_id, user_id, connection_time, shopping_list FROM carts WHERE cart_id = ?",
+        "SELECT user_id, shopping_list FROM carts WHERE cart_id = ?",
         (cart_id,),
     ).fetchone()
     conn.close()
-    if not row:
-        await update.message.reply_text("Cart not found in database.", reply_markup=MAIN_MENU_KBD)
+    if not row or not row["user_id"]:
+        await update.message.reply_text("No user is currently connected to this cart.", reply_markup=MAIN_MENU_KBD)
         return
 
-    payload = {
-        "cart_id": row["cart_id"],
-        "user_id": row["user_id"],
-        "connection_time": row["connection_time"],
-        "shopping_list": _load_json_list(row["shopping_list"]),
-        "generated_at": _utc_now_iso(),
-    }
+    shopping_list = _load_json_list(row["shopping_list"])
+    if not shopping_list:
+        await update.message.reply_text("Your shopping cart is empty! Scan some products first.", reply_markup=MAIN_MENU_KBD)
+        return
 
-    keyboard = [[InlineKeyboardButton("Copy payload", callback_data="noop")]]
-    await update.message.reply_text(
-        "💳 Checkout QR payload (JSON):\n\n" + json.dumps(payload, indent=2, ensure_ascii=False),
-        reply_markup=InlineKeyboardMarkup(keyboard),
+    # Generate QR Code URL
+    payload = f"https://t.me/StaffsMarketBot?start=CHK-{cart_id}"
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={payload}"
+
+    await update.message.reply_photo(
+        photo=qr_url, 
+        caption=(
+            f"🏁 <b>Checkout per Cart: {cart_id}</b>\n\n"
+            f"Show this QR code to the Staff to complete the payment and finish shopping.\n"
+            
+        ), 
+        parse_mode='HTML', 
+        reply_markup=MAIN_MENU_KBD
     )
 
 
