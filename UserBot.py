@@ -132,6 +132,30 @@ def add_to_user_wishlist(user_id, prod_id, user_name="User"):
     conn.close()
     return False
 
+def remove_from_user_wishlist(user_id, prod_id, user_name="User"):
+    conn = get_db_connection()
+    row = conn.execute("SELECT wish_list, cart_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if not row or not row['wish_list']:
+        conn.close()
+        return False
+        
+    wishlist = json.loads(row['wish_list'])
+    if prod_id in wishlist:
+        wishlist.remove(prod_id)
+        conn.execute("UPDATE users SET wish_list = ? WHERE user_id = ?", (json.dumps(wishlist), user_id))
+        if row['cart_id']:
+            conn.execute("UPDATE carts SET wish_list = ? WHERE cart_id = ?", (json.dumps(wishlist), row['cart_id']))
+            try:
+                payload = {"event": "wishlist_updated", "user_id": user_id, "user_name": user_name, "wish_list": wishlist}
+                mqtt_client.myPublish(f"cart/{row['cart_id']}/data", payload)
+            except Exception as e:
+                logger.error(f"MQTT Publish error: {e}")
+        conn.commit()
+        conn.close()
+        return True
+    conn.close()
+    return False
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     global event_loop
@@ -400,6 +424,7 @@ async def view_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if cart_row and cart_row['shopping_list']:
             scanned_items = json.loads(cart_row['shopping_list'])
 
+    keyboard = []
     for item_id in user_wishlist:
         # Find product details
         prod = conn.execute('SELECT product_name, price, promotion FROM products WHERE product_id = ?', (item_id,)).fetchone()
@@ -416,8 +441,11 @@ async def view_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 msg += f" (<s>€{original_price:.2f}</s> -{promotion}%)"
             msg += "\n"
             total_cost += current_price
+            
+            keyboard.append([InlineKeyboardButton(f"❌ Remove {prod['product_name']}", callback_data=f"rmwish_{item_id}")])
         else:
             msg += f"- Unknown Product ({item_id})\n"
+            keyboard.append([InlineKeyboardButton(f"❌ Remove {item_id}", callback_data=f"rmwish_{item_id}")])
             
     conn.close()
             
@@ -425,7 +453,9 @@ async def view_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if cart_id:
         msg += f"\n<i>(Items in your cart {cart_id} are struck through)</i>"
         
-    await update.message.reply_text(msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD)
+    reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else MAIN_MENU_KBD
+        
+    await update.message.reply_text(msg, parse_mode='HTML', reply_markup=reply_markup)
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Parses Callback queries from inline keyboards."""
@@ -528,7 +558,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             await query.edit_message_text(text=f"ℹ️ <b>{prod['product_name']}</b> is already in your wishlist.", parse_mode='HTML', reply_markup=reply_markup)
 
-    elif data == "back_categories" or data == "view_wish_inline":
+    elif data.startswith("rmwish_"):
+        prod_id = data.split("rmwish_")[1]
+        user_id = f"USR-{update.effective_user.id}"
+        
+        remove_from_user_wishlist(user_id, prod_id, update.effective_user.first_name)
+        
+        # Change data to "view_wish_inline" to re-render the wishlist inline
+        data = "view_wish_inline"
+
+    if data == "back_categories" or data == "view_wish_inline":
         if data == "view_wish_inline":
              # Simplified wishlist view for inline button
              user_id = f"USR-{update.effective_user.id}"
@@ -550,6 +589,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                  if cart_row and cart_row['shopping_list']:
                      scanned_items = json.loads(cart_row['shopping_list'])
 
+             keyboard = []
              for item_id in user_wishlist:
                  p = conn.execute('SELECT product_name, price, promotion FROM products WHERE product_id = ?', (item_id,)).fetchone()
                  if p:
@@ -565,11 +605,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                          line += f" (<s>€{original_price:.2f}</s>)"
                      msg += line + "\n"
                      total += price
+                     keyboard.append([InlineKeyboardButton(f"❌ Remove {p['product_name']}", callback_data=f"rmwish_{item_id}")])
              conn.close()
              msg += f"\n<b>Total: €{total:.2f}</b>"
              if cart_id:
                  msg += f"\n<i>Linked: {cart_id}</i>"
-             await query.edit_message_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data="back_categories")]]))
+             keyboard.append([InlineKeyboardButton("« Back", callback_data="back_categories")])
+             await query.edit_message_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
              return
 
         conn = get_db_connection()
