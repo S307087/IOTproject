@@ -38,9 +38,39 @@ class UserNotifier:
         if event == "checkout_complete":
             payment_id = payload.get("payment_id", "N/A")
             total = payload.get("total", 0.0)
+            
+            items_text = ""
+            try:
+                conn = get_db_connection()
+                tx = conn.execute("SELECT product_list FROM transactions WHERE payment_id = ?", (payment_id,)).fetchone()
+                if tx and tx['product_list']:
+                    shopping_list = json.loads(tx['product_list'])
+                    if shopping_list:
+                        placeholders = ",".join(["?"] * len(shopping_list))
+                        products = conn.execute(
+                            f"SELECT product_id, product_name, price, promotion FROM products WHERE product_id IN ({placeholders})",
+                            shopping_list
+                        ).fetchall()
+                        prod_dict = {p["product_id"]: p for p in products}
+                        
+                        for pid in shopping_list:
+                            p = prod_dict.get(pid)
+                            if p:
+                                name = p["product_name"]
+                                price = p["price"] or 0.0
+                                promo = p["promotion"] or 0
+                                curr_price = price * (1 - promo / 100)
+                                items_text += f"— {name}: €{curr_price:.2f}\n"
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error fetching shopping list for receipt: {e}")
+                
+            items_section = f"<b>Shopping List:</b>\n{items_text}\n" if items_text else ""
+            
             msg = (
                 f"🧾 <b>Payment Complete!</b>\n\n"
                 f"Transaction: <code>{payment_id}</code>\n"
+                f"{items_section}"
                 f"Total Paid: <b>€{total:.2f}</b>\n\n"
                 f"Thank you for shopping with us! You have been disconnected from the cart."
             )
