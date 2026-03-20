@@ -405,14 +405,18 @@ async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ).fetchall()
     conn.close()
 
+    prod_dict = {p["product_id"]: p for p in products}
+
     msg = "🧾 Shopping list:\n\n"
     total = 0.0
-    for p in products:
-        promo = int(p["promotion"] or 0)
-        price = float(p["price"] or 0.0)
-        final_price = price * (1 - promo / 100)
-        total += final_price
-        msg += f"- {p['product_name']} [{p['product_id']}] €{final_price:.2f}\n"
+    for pid in product_ids:
+        p = prod_dict.get(pid)
+        if p:
+            promo = int(p["promotion"] or 0)
+            price = float(p["price"] or 0.0)
+            final_price = price * (1 - promo / 100)
+            total += final_price
+            msg += f"- {p['product_name']} [{p['product_id']}] €{final_price:.2f}\n"
     msg += f"\nCurrent total: €{total:.2f}"
     await update.message.reply_text(msg, reply_markup=MAIN_MENU_KBD)
 
