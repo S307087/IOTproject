@@ -270,11 +270,23 @@ async def edit_stock_warehouse(update: Update, context: ContextTypes.DEFAULT_TYP
         pid = context.user_data['pid']
         
         conn = get_db_connection()
+        old_row = conn.execute("SELECT shelf_stock FROM products WHERE product_id = ?", (pid,)).fetchone()
+        old_shelf = old_row["shelf_stock"] if old_row else 0
+        diff = shelf - old_shelf
+        
+        msg_extra = ""
+        if diff > 0:
+            import uuid
+            new_rfids = [f"RFID-{uuid.uuid4().hex[:8].upper()}" for _ in range(diff)]
+            for rfid in new_rfids:
+                conn.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, pid))
+            msg_extra = f"\nGenerated {diff} new RFIDs."
+
         conn.execute('UPDATE products SET shelf_stock = ?, warehouse_stock = ? WHERE product_id = ?', (shelf, warehouse, pid))
         conn.commit()
         conn.close()
         
-        await update.message.reply_text(f"✅ Stock updated for {pid}!")
+        await update.message.reply_text(f"✅ Stock updated for {pid}!{msg_extra}")
         # Return to product view
         await show_staff_product_view(update, pid)
         return ConversationHandler.END
@@ -429,11 +441,24 @@ async def update_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        old_row = cursor.execute("SELECT shelf_stock FROM products WHERE product_id = ?", (pid,)).fetchone()
+        old_shelf = old_row["shelf_stock"] if old_row else 0
+        diff = shelf - old_shelf
+        
+        msg_extra = ""
+        if diff > 0:
+            import uuid
+            new_rfids = [f"RFID-{uuid.uuid4().hex[:8].upper()}" for _ in range(diff)]
+            for rfid in new_rfids:
+                cursor.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, pid))
+            msg_extra = f" (+{diff} RFIDs)"
+
         cursor.execute('UPDATE products SET shelf_stock = ?, warehouse_stock = ? WHERE product_id = ?', (shelf, warehouse, pid))
         conn.commit()
         
         if cursor.rowcount > 0:
-            await update.message.reply_text(f"✅ Stock updated for {pid}.")
+            await update.message.reply_text(f"✅ Stock updated for {pid}.{msg_extra}")
         else:
             await update.message.reply_text(f"❓ Product {pid} not found.")
         conn.close()
@@ -482,7 +507,7 @@ async def view_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def finalize_checkout(cart_id: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn = get_db_connection()
     row = conn.execute(
-        "SELECT user_id, shopping_list, connection_time FROM carts WHERE cart_id = ?",
+        "SELECT user_id, shopping_list, scanned_rfids, connection_time FROM carts WHERE cart_id = ?",
         (cart_id,)
     ).fetchone()
     
@@ -547,8 +572,19 @@ async def finalize_checkout(cart_id: str, update: Update, context: ContextTypes.
         (payment_id, user_id, total_amount, shopping_list_json, dwell_time)
     )
     
+    # Delete purchased RFIDs from database
+    scanned_rfids_json = row["scanned_rfids"] if "scanned_rfids" in row.keys() else "[]"
+    try:
+        scanned_rfids_list = json.loads(scanned_rfids_json) if scanned_rfids_json else []
+    except Exception:
+        scanned_rfids_list = []
+        
+    if scanned_rfids_list:
+        placeholders = ",".join(["?"] * len(scanned_rfids_list))
+        conn.execute(f"DELETE FROM rfid_tags WHERE rfid_id IN ({placeholders})", scanned_rfids_list)
+
     # Empty Cart
-    conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
+    conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', scanned_rfids='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
     
     # Unlink User
     conn.execute("UPDATE users SET cart_id=NULL WHERE user_id=?", (user_id,))

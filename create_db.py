@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import uuid
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILENAME = os.path.join(BASE_DIR, 'catalog.db')
@@ -38,6 +39,7 @@ def create_db():
             user_id TEXT,
             shopping_list TEXT,         -- JSON list of product_ids
             wish_list TEXT,             -- JSON list of product_ids from User
+            scanned_rfids TEXT,         -- JSON list of rfid_ids scanned into cart
             connection_time TEXT
         )
         '''
@@ -322,6 +324,10 @@ def create_db():
             ),
         )
         inserted += 1
+        
+        for _ in range(p["shelf_stock"]):
+            rfid = f"RFID-{uuid.uuid4().hex[:8].upper()}"
+            cursor.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, p["product_id"]))
 
     # --- Seed other catalog entities (example data) ---
 
@@ -334,10 +340,10 @@ def create_db():
         '''
     )
 
-    carts_values = ",\n            ".join([f"('CRT-{str(i).zfill(3)}', NULL, '[]', '[]', NULL)" for i in range(1, 16)])
+    carts_values = ",\n            ".join([f"('CRT-{str(i).zfill(3)}', NULL, '[]', '[]', '[]', NULL)" for i in range(1, 16)])
     cursor.execute(
         f'''
-        INSERT OR REPLACE INTO carts (cart_id, user_id, shopping_list, wish_list, connection_time)
+        INSERT OR REPLACE INTO carts (cart_id, user_id, shopping_list, wish_list, scanned_rfids, connection_time)
         VALUES
             {carts_values}
         '''
@@ -373,16 +379,7 @@ def create_db():
 
     cursor.execute('DELETE FROM transactions')
 
-    cursor.execute(
-        '''
-        INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id)
-        VALUES
-            ('RFID-0001', 'FRU-0001'),
-            ('RFID-0002', 'BRK-1001'),
-            ('RFID-0003', 'HYG-2002'),
-            ('RFID-0004', 'BEV-3002')
-        '''
-    )
+    # Initial RFIDs are now generated dynamically during product insertion.
 
     conn.commit()
 

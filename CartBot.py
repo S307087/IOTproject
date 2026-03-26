@@ -228,7 +228,7 @@ async def disconnect_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         for item_id in items:
             conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (item_id,))
 
-    conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
+    conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', scanned_rfids='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
     conn.commit()
     conn.close()
     
@@ -296,20 +296,30 @@ async def show_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Simulates an RFID scan by product_id.
-    Usage: /scan <PRODUCT_ID>
+    Simulates an RFID scan to add a product to the cart.
+    Usage: /scan <RFID_ID>
     """
     cart_id = context.bot_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
     if not context.args:
-        await update.message.reply_text("Usage: /scan <PRODUCT_ID>")
+        await update.message.reply_text("Usage: /scan <RFID_ID>")
         return
 
-    product_id = context.args[0].strip().upper()
+    rfid_id = context.args[0].strip().upper()
 
     conn = get_db_connection()
+    # Find the product associated with this RFID
+    rfid_row = conn.execute("SELECT product_id FROM rfid_tags WHERE rfid_id = ?", (rfid_id,)).fetchone()
+    
+    if not rfid_row:
+        conn.close()
+        await update.message.reply_text(f"❌ Invalid RFID or unassigned tag: {rfid_id}", reply_markup=MAIN_MENU_KBD)
+        return
+        
+    product_id = rfid_row["product_id"]
+
     prod = conn.execute(
         "SELECT product_id, product_name, shelf_stock FROM products WHERE product_id = ?",
         (product_id,),
@@ -317,7 +327,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     if not prod:
         conn.close()
-        await update.message.reply_text(f"Product not found: {product_id}", reply_markup=MAIN_MENU_KBD)
+        await update.message.reply_text(f"Product not found for this RFID: {product_id}", reply_markup=MAIN_MENU_KBD)
         return
         
     if prod["shelf_stock"] <= 0:
@@ -326,61 +336,82 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     cart_row = conn.execute(
-        "SELECT shopping_list FROM carts WHERE cart_id = ?",
+        "SELECT shopping_list, wish_list, scanned_rfids, user_id FROM carts WHERE cart_id = ?",
         (cart_id,),
     ).fetchone()
+    
+    scanned_rfids = _load_json_list(cart_row["scanned_rfids"] if cart_row else None)
+    if rfid_id in scanned_rfids:
+        conn.close()
+        await update.message.reply_text(f"⚠️ This exact item ({rfid_id}) has already been scanned into the cart!", reply_markup=MAIN_MENU_KBD)
+        return
+        
+    scanned_rfids.append(rfid_id)
+
     shopping_list = _load_json_list(cart_row["shopping_list"] if cart_row else None)
     shopping_list.append(product_id)
 
     conn.execute("UPDATE products SET shelf_stock = shelf_stock - 1 WHERE product_id = ?", (product_id,))
     conn.execute(
-        "UPDATE carts SET shopping_list = ? WHERE cart_id = ?",
-        (_save_json_list(shopping_list), cart_id),
+        "UPDATE carts SET shopping_list = ?, scanned_rfids = ? WHERE cart_id = ?",
+        (_save_json_list(shopping_list), _save_json_list(scanned_rfids), cart_id),
     )
+    
     conn.commit()
     conn.close()
 
     await update.message.reply_text(
-        f"✅ Added to cart: {prod['product_name']} [{product_id}] (Stock -1)",
+        f"✅ Added to cart: {prod['product_name']} [RFID: {rfid_id}] (Stock -1)",
         reply_markup=MAIN_MENU_KBD,
     )
 
 async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Simulates removing an item from the cart.
-    Usage: /unscan <PRODUCT_ID>
+    Usage: /unscan <RFID_ID>
     """
     cart_id = context.bot_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
     if not context.args:
-        await update.message.reply_text("Usage: /unscan <PRODUCT_ID>")
+        await update.message.reply_text("Usage: /unscan <RFID_ID>")
         return
 
-    product_id = context.args[0].strip().upper()
+    rfid_id = context.args[0].strip().upper()
 
     conn = get_db_connection()
-    cart_row = conn.execute("SELECT shopping_list FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
-    shopping_list = _load_json_list(cart_row["shopping_list"] if cart_row else None)
+    cart_row = conn.execute("SELECT shopping_list, scanned_rfids FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+    
+    scanned_rfids = _load_json_list(cart_row["scanned_rfids"] if cart_row else None)
 
-    if product_id not in shopping_list:
+    if rfid_id not in scanned_rfids:
         conn.close()
-        await update.message.reply_text(f"❌ Product {product_id} is not in your cart.", reply_markup=MAIN_MENU_KBD)
+        await update.message.reply_text(f"❌ RFID {rfid_id} is not in your cart.", reply_markup=MAIN_MENU_KBD)
         return
 
-    shopping_list.remove(product_id)
+    # Find the product associated with this RFID
+    rfid_row = conn.execute("SELECT product_id FROM rfid_tags WHERE rfid_id = ?", (rfid_id,)).fetchone()
+    product_id = rfid_row["product_id"] if rfid_row else None
 
-    conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (product_id,))
+    scanned_rfids.remove(rfid_id)
+    
+    shopping_list = _load_json_list(cart_row["shopping_list"] if cart_row else None)
+    if product_id and product_id in shopping_list:
+        shopping_list.remove(product_id)
+
+    if product_id:
+        conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (product_id,))
+        
     conn.execute(
-        "UPDATE carts SET shopping_list = ? WHERE cart_id = ?",
-        (_save_json_list(shopping_list), cart_id),
+        "UPDATE carts SET shopping_list = ?, scanned_rfids = ? WHERE cart_id = ?",
+        (_save_json_list(shopping_list), _save_json_list(scanned_rfids), cart_id),
     )
     conn.commit()
     conn.close()
 
     await update.message.reply_text(
-        f"✅ Removed from cart: [{product_id}] (Stock +1)",
+        f"✅ Removed from cart: [RFID: {rfid_id}] (Stock +1)",
         reply_markup=MAIN_MENU_KBD,
     )
 

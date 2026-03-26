@@ -321,7 +321,7 @@ async def disconnect_user(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             for item_id in items:
                 conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (item_id,))
 
-        conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
+        conn.execute("UPDATE carts SET user_id=NULL, shopping_list='[]', wish_list='[]', scanned_rfids='[]', connection_time=NULL WHERE cart_id=?", (cart_id,))
         # Send MQTT notification
         try:
             payload = {"event": "user_disconnected", "user_id": user_id}
