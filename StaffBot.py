@@ -15,12 +15,35 @@ from telegram.ext import (
 )
 from smartmarket_MQTT import MyMQTT
 
+import asyncio
+
 class StaffNotifier:
+    def __init__(self):
+        self.app = None
+        self.admin_chat_ids = set()
+
     def notify(self, topic, payload):
-        pass
+        if topic == "staff/alerts" and self.app and event_loop:
+            level = payload.get("level", "WARNING")
+            msg = payload.get("message", "Unknown Alert")
+            text = f"🚨 <b>{level} ALARM</b> 🚨\n{msg}"
+            
+            if not self.admin_chat_ids:
+                print(f"⚠️ [StaffNotifier] Alert received but NO ADMIN IS CONNECTED to StaffBot right now: {text}")
+                return
+                
+            for cid in self.admin_chat_ids:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self.app.bot.send_message(chat_id=cid, text=text, parse_mode='HTML'),
+                        event_loop
+                    )
+                except Exception as e:
+                    print(f"Failed to send alert: {e}")
 
 notifier = StaffNotifier()
 mqtt_client = MyMQTT("StaffBotClient", "localhost", 1883, notifier=notifier)
+event_loop = None
 
 # Enable logging
 logging.basicConfig(
@@ -47,8 +70,23 @@ def get_db_connection():
 
 # --- Command Handlers ---
 
+async def capture_chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global event_loop
+    if event_loop is None:
+        try:
+            event_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            event_loop = asyncio.get_event_loop()
+            
+    if notifier.app is None:
+        notifier.app = context.application
+        
+    if update.effective_chat:
+        notifier.admin_chat_ids.add(update.effective_chat.id)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
+    # Chat ID is now captured automatically by TypeHandler
     if context.args:
         param = context.args[0].upper()
         if param.startswith("CHK-"):
@@ -57,7 +95,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
     reply_keyboard = [
-        ["📂 Browse Catalog", "🔍 Search Product"],
+        ["📂 Browse Catalog", "🚨 Active Alerts"],
         ["➕ Add Product", "📦 Quick View"],
         ["📈 Update Stock", "🔥 Manage Promo"],
         ["❌ Delete Product"]
@@ -89,16 +127,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     text = update.message.text
     
     # Reset search state on any valid menu button press
-    if text in ["➕ Add Product", "📂 Browse Catalog", "🔍 Search Product", "📦 Quick View", "📈 Update Stock", "🔥 Manage Promo", "❌ Delete Product"]:
+    if text in ["➕ Add Product", "📂 Browse Catalog", "🚨 Active Alerts", "📦 Quick View", "📈 Update Stock", "🔥 Manage Promo", "❌ Delete Product"]:
         context.user_data['staff_awaiting_search'] = False
 
     if text == "➕ Add Product":
         return await add_start(update, context)
     elif text == "📂 Browse Catalog":
         return await browse_categories(update, context)
-    elif text == "🔍 Search Product":
-        context.user_data['staff_awaiting_search'] = True
-        await update.message.reply_html("🔍 <b>Search Mode Active (Staff)</b>\n\nType the product name to manage, or click another menu button to cancel.")
+    elif text == "🚨 Active Alerts":
+        return await show_active_alerts(update, context)
     elif text == "📦 Quick View":
         await update.message.reply_text("Usage: /view <ID> or browse/search for a product.")
     elif text == "📈 Update Stock":
@@ -610,6 +647,7 @@ def main() -> None:
     """Start the bot."""
     
     try:
+        mqtt_client.mySubscribe("staff/alerts")
         mqtt_client.start()
     except Exception as e:
         logger.error(f"Failed to start MQTT Client: {e}")
@@ -618,6 +656,9 @@ def main() -> None:
         print("WARNING: Replace STAFF_BOT_TOKEN with your unique token.")
         
     application = ApplicationBuilder().token(STAFF_BOT_TOKEN).build()
+
+    from telegram.ext import TypeHandler
+    application.add_handler(TypeHandler(Update, capture_chat_id), group=-1)
 
     # Combined Administrative Management Conversation
     admin_conv = ConversationHandler(

@@ -63,7 +63,9 @@ def create_db():
             shelf_id TEXT PRIMARY KEY,
             shelf_type TEXT,
             temperature_threshold REAL,
-            product_ids TEXT            -- JSON list of product_ids
+            product_ids TEXT,           -- JSON list of product_ids
+            max_capacity INTEGER,       -- Max items this shelf can hold
+            proportions TEXT            -- JSON mapping: product_id -> proportion e.g. {"ID1": 0.5, "ID2": 0.5}
         )
         '''
     )
@@ -194,7 +196,7 @@ def create_db():
             "promotion": 0,
             "shelf_id": "S-HY-2",
             "shelf_stock": 15,
-            "warehouse_stock": 60,
+            "warehouse_stock": 19,
             "category": "Hygiene",
         },
         # Beverages
@@ -351,20 +353,20 @@ def create_db():
 
     cursor.execute(
         '''
-        INSERT OR REPLACE INTO shelves (shelf_id, shelf_type, temperature_threshold, product_ids)
+        INSERT OR REPLACE INTO shelves (shelf_id, shelf_type, temperature_threshold, product_ids, max_capacity, proportions)
         VALUES
-            ('S-FR-1', 'Fresh Produce', 8.0, '["FRU-0001", "FRU-0002"]'),
-            ('S-FR-2', 'Fresh Produce', 8.0, '["FRU-0003"]'),
-            ('S-BR-1', 'Dry Food', 22.0, '["BRK-1001", "BRK-1002"]'),
-            ('S-BR-2', 'Dry Food', 22.0, '["BRK-1003"]'),
-            ('S-HY-1', 'Hygiene', 25.0, '["HYG-2001", "HYG-2002"]'),
-            ('S-HY-2', 'Hygiene', 25.0, '["HYG-2003"]'),
-            ('S-BE-1', 'Beverages', 18.0, '["BEV-3001", "BEV-3002"]'),
-            ('S-BE-2', 'Beverages', 18.0, '["BEV-3003"]'),
-            ('S-SN-1', 'Snacks', 22.0, '["SNK-4001", "SNK-4002"]'),
-            ('S-SN-2', 'Snacks', 22.0, '["SNK-4003"]'),
-            ('S-FZ-1', 'Frozen', -18.0, '["FRZ-5001", "FRZ-5002"]'),
-            ('S-BK-1', 'Bakery', 22.0, '["BAK-6001", "BAK-6002"]')
+            ('S-FR-1', 'Fresh Produce', 8.0, '["FRU-0001", "FRU-0002"]', 100, '{"FRU-0001": 0.5, "FRU-0002": 0.5}'),
+            ('S-FR-2', 'Fresh Produce', 8.0, '["FRU-0003"]', 50, '{"FRU-0003": 1.0}'),
+            ('S-BR-1', 'Dry Food', 22.0, '["BRK-1001", "BRK-1002"]', 60, '{"BRK-1001": 0.6, "BRK-1002": 0.4}'),
+            ('S-BR-2', 'Dry Food', 22.0, '["BRK-1003"]', 40, '{"BRK-1003": 1.0}'),
+            ('S-HY-1', 'Hygiene', 25.0, '["HYG-2001", "HYG-2002"]', 80, '{"HYG-2001": 0.5, "HYG-2002": 0.5}'),
+            ('S-HY-2', 'Hygiene', 25.0, '["HYG-2003"]', 75, '{"HYG-2003": 1.0}'),
+            ('S-BE-1', 'Beverages', 18.0, '["BEV-3001", "BEV-3002"]', 150, '{"BEV-3001": 0.6, "BEV-3002": 0.4}'),
+            ('S-BE-2', 'Beverages', 18.0, '["BEV-3003"]', 50, '{"BEV-3003": 1.0}'),
+            ('S-SN-1', 'Snacks', 22.0, '["SNK-4001", "SNK-4002"]', 80, '{"SNK-4001": 0.5, "SNK-4002": 0.5}'),
+            ('S-SN-2', 'Snacks', 22.0, '["SNK-4003"]', 40, '{"SNK-4003": 1.0}'),
+            ('S-FZ-1', 'Frozen', -18.0, '["FRZ-5001", "FRZ-5002"]', 60, '{"FRZ-5001": 0.5, "FRZ-5002": 0.5}'),
+            ('S-BK-1', 'Bakery', 22.0, '["BAK-6001", "BAK-6002"]', 50, '{"BAK-6001": 0.5, "BAK-6002": 0.5}')
         '''
     )
 

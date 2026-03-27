@@ -321,7 +321,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     product_id = rfid_row["product_id"]
 
     prod = conn.execute(
-        "SELECT product_id, product_name, shelf_stock FROM products WHERE product_id = ?",
+        "SELECT product_id, product_name, shelf_stock, shelf_id FROM products WHERE product_id = ?",
         (product_id,),
     ).fetchone()
     
@@ -351,7 +351,9 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     shopping_list = _load_json_list(cart_row["shopping_list"] if cart_row else None)
     shopping_list.append(product_id)
 
-    conn.execute("UPDATE products SET shelf_stock = shelf_stock - 1 WHERE product_id = ?", (product_id,))
+    shelf_id = prod["shelf_id"]
+    
+    # We remove the direct shelf_stock decrement, AlertSystem handles it!
     conn.execute(
         "UPDATE carts SET shopping_list = ?, scanned_rfids = ? WHERE cart_id = ?",
         (_save_json_list(shopping_list), _save_json_list(scanned_rfids), cart_id),
@@ -360,8 +362,19 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn.commit()
     conn.close()
 
+    # Trigger the Alert System
+    try:
+        mqtt_client.myPublish(f"shelf/{shelf_id}/events", {
+            "event": "rfid_update",
+            "action": "removed",
+            "rfid": rfid_id,
+            "shelf_id": shelf_id
+        })
+    except Exception as e:
+        logger.error(f"Failed to publish to Alert System: {e}")
+
     await update.message.reply_text(
-        f"✅ Added to cart: {prod['product_name']} [RFID: {rfid_id}] (Stock -1)",
+        f"✅ Added to cart: {prod['product_name']} [RFID: {rfid_id}] (Scan registered, shelf updating)",
         reply_markup=MAIN_MENU_KBD,
     )
 
@@ -393,6 +406,11 @@ async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Find the product associated with this RFID
     rfid_row = conn.execute("SELECT product_id FROM rfid_tags WHERE rfid_id = ?", (rfid_id,)).fetchone()
     product_id = rfid_row["product_id"] if rfid_row else None
+    
+    shelf_id = None
+    if product_id:
+        prod_row = conn.execute("SELECT shelf_id FROM products WHERE product_id = ?", (product_id,)).fetchone()
+        shelf_id = prod_row["shelf_id"] if prod_row else None
 
     scanned_rfids.remove(rfid_id)
     
@@ -401,7 +419,7 @@ async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         shopping_list.remove(product_id)
 
     if product_id:
-        conn.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (product_id,))
+        pass # AlertSystem will restore the stock
         
     conn.execute(
         "UPDATE carts SET shopping_list = ?, scanned_rfids = ? WHERE cart_id = ?",
@@ -410,8 +428,19 @@ async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn.commit()
     conn.close()
 
+    if shelf_id:
+        try:
+            mqtt_client.myPublish(f"shelf/{shelf_id}/events", {
+                "event": "rfid_update",
+                "action": "added",
+                "rfid": rfid_id,
+                "shelf_id": shelf_id
+            })
+        except Exception as e:
+            logger.error(f"Failed to publish to Alert System: {e}")
+
     await update.message.reply_text(
-        f"✅ Removed from cart: [RFID: {rfid_id}] (Stock +1)",
+        f"✅ Removed from cart: [RFID: {rfid_id}] (Unscan registered, shelf updating)",
         reply_markup=MAIN_MENU_KBD,
     )
 

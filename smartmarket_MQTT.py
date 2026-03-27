@@ -37,6 +37,9 @@ class MyMQTT:
     def myOnConnect(self, paho_mqtt, userdata, flags, rc):
         # Viene eseguita quando il client si connette al broker
         print(f"[{self.service_name}] Connected to {self.broker}:{self.port} with result code {rc}")
+        for topic in self._topics:
+            print(f"[{self.service_name}] Auto-subscribing to {topic} after connect...")
+            self._paho_mqtt.subscribe(topic, 1)
 
     def myOnDisconnect(self, paho_mqtt, userdata, rc):
         # Viene eseguita quando il client si disconnette
