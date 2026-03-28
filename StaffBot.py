@@ -21,12 +21,21 @@ class StaffNotifier:
     def __init__(self):
         self.app = None
         self.admin_chat_ids = set()
+        self.alert_history = []
 
     def notify(self, topic, payload):
         if topic == "staff/alerts" and self.app and event_loop:
             level = payload.get("level", "WARNING")
             msg = payload.get("message", "Unknown Alert")
             text = f"🚨 <b>{level} ALARM</b> 🚨\n{msg}"
+            
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            self.alert_history.insert(0, {
+                "msg": msg,
+                "str": f"[{timestamp}] {level}: {msg}"
+            })
+            if len(self.alert_history) > 40:
+                self.alert_history.pop()
             
             if not self.admin_chat_ids:
                 print(f"⚠️ [StaffNotifier] Alert received but NO ADMIN IS CONNECTED to StaffBot right now: {text}")
@@ -177,6 +186,36 @@ async def search_staff_products(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_html(f"✅ Found {len(results)} results for '<b>{query_text}</b>':", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # --- Browsing & Interaction ---
+
+import re
+
+def get_alert_signature(msg):
+    m1 = re.search(r"Warehouse stock for .*?\((.*?)\)", msg)
+    if m1: return (m1.group(1), "warehouse")
+    m2 = re.search(r"Shelf .*? is running low on (.*?)!", msg)
+    if m2: return (m2.group(1), "shelf")
+    return (msg, "general")
+
+async def show_active_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    history = notifier.alert_history
+    if not history:
+        await update.message.reply_text("✅ No active alerts at the moment. Everything is running smoothly!")
+        return
+    
+    seen = set()
+    deduped = []
+    
+    for alert in history:
+        sig = get_alert_signature(alert["msg"])
+        if sig not in seen:
+            seen.add(sig)
+            deduped.append(alert["str"])
+    
+    msg_text = "🚨 *Recent Alerts History* 🚨\n\n"
+    for s in deduped:
+        msg_text += f"`{s}`\n\n"
+        
+    await update.message.reply_text(msg_text[:4000], parse_mode='Markdown')
 
 async def browse_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn = get_db_connection()
