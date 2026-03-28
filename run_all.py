@@ -1,6 +1,7 @@
 import subprocess
 import time
 import sys
+import os
 
 scripts = [
     "CatalogAPI.py",
@@ -17,10 +18,14 @@ print("Starting all services in a single terminal")
 print("==============================================\n")
 
 try:
+    # Get the directory where run_all.py is located
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
     for script in scripts:
         print(f"[*] Starting {script}...")
         # Popen starts the process in the background and output is visible in this terminal
-        p = subprocess.Popen([sys.executable, script])
+        # cwd=base_dir ensures the scripts are launched in their correct folder
+        p = subprocess.Popen([sys.executable, script], cwd=base_dir)
         processes.append((script, p))
         time.sleep(2)  # Small delay to start them in order without overlapping
 
