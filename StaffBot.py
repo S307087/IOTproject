@@ -217,6 +217,46 @@ async def show_active_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
     await update.message.reply_text(msg_text[:4000], parse_mode='Markdown')
 
+def check_and_remove_alerts(pid, new_shelf_stock, new_warehouse_stock, conn):
+    prod = conn.execute("SELECT p.product_name, p.shelf_id, s.max_capacity, s.proportions FROM products p LEFT JOIN shelves s ON p.shelf_id = s.shelf_id WHERE p.product_id = ?", (pid,)).fetchone()
+    if not prod: return
+    
+    product_name = prod["product_name"]
+    
+    max_cap = prod["max_capacity"] or 0
+    props_str = prod["proportions"]
+    props = {}
+    if props_str:
+        try:
+            props = json.loads(props_str)
+        except json.JSONDecodeError:
+            pass
+            
+    prop = props.get(pid, 0)
+    max_allowed = int(max_cap * prop)
+    min_threshold = int(max_allowed * 0.20)
+    if min_threshold == 0 and max_allowed > 0: 
+        min_threshold = 1
+    
+    new_history = []
+    for alert in notifier.alert_history:
+        msg = alert["msg"]
+        sig_id, sig_type = get_alert_signature(msg)
+        
+        remove = False
+        if sig_type == "warehouse":
+            if sig_id == pid and new_warehouse_stock >= 20:
+                remove = True
+        elif sig_type == "shelf":
+            if sig_id == pid or sig_id == product_name:
+                if new_shelf_stock >= min_threshold:
+                    remove = True
+                    
+        if not remove:
+            new_history.append(alert)
+            
+    notifier.alert_history = new_history
+
 async def browse_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn = get_db_connection()
     categories = [row['category'] for row in conn.execute('SELECT DISTINCT category FROM products WHERE category IS NOT NULL').fetchall()]
@@ -359,6 +399,7 @@ async def edit_stock_warehouse(update: Update, context: ContextTypes.DEFAULT_TYP
             msg_extra = f"\nGenerated {diff} new RFIDs."
 
         conn.execute('UPDATE products SET shelf_stock = ?, warehouse_stock = ? WHERE product_id = ?', (shelf, warehouse, pid))
+        check_and_remove_alerts(pid, shelf, warehouse, conn)
         conn.commit()
         conn.close()
         
@@ -531,6 +572,7 @@ async def update_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             msg_extra = f" (+{diff} RFIDs)"
 
         cursor.execute('UPDATE products SET shelf_stock = ?, warehouse_stock = ? WHERE product_id = ?', (shelf, warehouse, pid))
+        check_and_remove_alerts(pid, shelf, warehouse, conn)
         conn.commit()
         
         if cursor.rowcount > 0:
