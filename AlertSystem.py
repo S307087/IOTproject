@@ -57,6 +57,17 @@ class AlertSystem:
             if r.status_code == 200:
                 data = r.json()
                 product_id = data.get("product_id")
+                shelf_stock_new = data.get("shelf_stock")
+                warehouse_stock_new = data.get("warehouse_stock")
+                
+                # We always inform StaffBot of stock updates so that it can clear resolved alerts
+                self.mqtt_client.myPublish("staff/alerts", {
+                    "event": "stock_updated",
+                    "product_id": product_id,
+                    "shelf_stock": shelf_stock_new,
+                    "warehouse_stock": warehouse_stock_new
+                })
+                
                 
                 # 2. Retrieve Product Details to check thresholds
                 prod_req = requests.get(f"{REST_API_URL}/get_product_by_rfid?rfid={rfid}")

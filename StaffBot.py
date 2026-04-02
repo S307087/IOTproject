@@ -25,6 +25,17 @@ class StaffNotifier:
 
     def notify(self, topic, payload):
         if topic == "staff/alerts" and self.app and event_loop:
+            if payload.get("event") == "stock_updated":
+                pid = payload.get("product_id")
+                shelf_stock = payload.get("shelf_stock")
+                warehouse_stock = payload.get("warehouse_stock")
+                conn = get_db_connection()
+                try:
+                    check_and_remove_alerts(pid, shelf_stock, warehouse_stock, conn)
+                finally:
+                    conn.close()
+                return
+
             level = payload.get("level", "WARNING")
             msg = payload.get("message", "Unknown Alert")
             text = f"🚨 <b>{level} ALARM</b> 🚨\n{msg}"
