@@ -24,7 +24,6 @@ class MyMQTT:
 
         # Creo il client MQTT
         self._paho_mqtt = PahoMQTT.Client(
-            PahoMQTT.CallbackAPIVersion.VERSION1,
             client_id=self.clientID,
             clean_session=self.clean_session
         )
