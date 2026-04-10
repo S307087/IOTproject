@@ -5,18 +5,10 @@ import uuid
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILENAME = os.path.join(BASE_DIR, 'catalog.db')
 
-def create_db():
-    # Remove existing db to start fresh if we run this multiple times
-    if os.path.exists(DB_FILENAME):
-        os.remove(DB_FILENAME)
-
-    conn = sqlite3.connect(DB_FILENAME)
-    cursor = conn.cursor()
-
-    # --- Core catalog tables (all in English) ---
-
-    # Products
-    cursor.execute(
+def create_schema(conn):
+    """Crea la struttura delle tabelle (DDL) nel database."""
+    # executemany o executescript sono best practice per eseguire blocchi massivi
+    conn.executescript(
         '''
         CREATE TABLE IF NOT EXISTS products (
             product_id TEXT PRIMARY KEY,
@@ -27,13 +19,8 @@ def create_db():
             shelf_stock INTEGER DEFAULT 0,
             warehouse_stock INTEGER DEFAULT 0,
             category TEXT
-        )
-        '''
-    )
+        );
 
-    # Carts
-    cursor.execute(
-        '''
         CREATE TABLE IF NOT EXISTS carts (
             cart_id TEXT PRIMARY KEY,
             user_id TEXT,
@@ -41,24 +28,14 @@ def create_db():
             wish_list TEXT,             -- JSON list of product_ids from User
             scanned_rfids TEXT,         -- JSON list of rfid_ids scanned into cart
             connection_time TEXT
-        )
-        '''
-    )
+        );
 
-    # Users
-    cursor.execute(
-        '''
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             cart_id TEXT,
             wish_list TEXT              -- JSON list of product_ids
-        )
-        '''
-    )
+        );
 
-    # Shelves
-    cursor.execute(
-        '''
         CREATE TABLE IF NOT EXISTS shelves (
             shelf_id TEXT PRIMARY KEY,
             shelf_type TEXT,
@@ -66,45 +43,30 @@ def create_db():
             product_ids TEXT,           -- JSON list of product_ids
             max_capacity INTEGER,       -- Max items this shelf can hold
             proportions TEXT            -- JSON mapping: product_id -> proportion e.g. {"ID1": 0.5, "ID2": 0.5}
-        )
-        '''
-    )
+        );
 
-    # Robots
-    cursor.execute(
-        '''
         CREATE TABLE IF NOT EXISTS robots (
             robot_id TEXT PRIMARY KEY,
             in_use INTEGER NOT NULL DEFAULT 0
-        )
-        '''
-    )
+        );
 
-    # Transactions
-    cursor.execute(
-        '''
         CREATE TABLE IF NOT EXISTS transactions (
             payment_id TEXT PRIMARY KEY,
             user_id TEXT,
             total_amount REAL,
             product_list TEXT,          -- JSON list of product_ids
             dwell_time_seconds INTEGER
-        )
-        '''
-    )
+        );
 
-    # RFID tags
-    cursor.execute(
-        '''
         CREATE TABLE IF NOT EXISTS rfid_tags (
             rfid_id TEXT PRIMARY KEY,
             product_id TEXT
-        )
+        );
         '''
     )
 
-    # --- Seed products in English with multiple categories ---
-
+def seed_products(conn):
+    """Inizializza il catalogo prodotti e i rispettivi tag RFID."""
     base_products = [
         # Fruits & Vegetables
         {
@@ -305,92 +267,81 @@ def create_db():
         },
     ]
 
-    inserted = 0
+    # Prepara le tuple per l'inserimento bulk (batching), pedagogicamente più ottimizzato
+    products_data = []
+    rfids_data = []
+
     for p in base_products:
-        cursor.execute(
-            '''
-            INSERT OR REPLACE INTO products (
-                product_id, product_name, price, promotion,
-                shelf_id, shelf_stock, warehouse_stock, category
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''',
-            (
-                p["product_id"],
-                p["product_name"],
-                p["price"],
-                p["promotion"],
-                p["shelf_id"],
-                p["shelf_stock"],
-                p["warehouse_stock"],
-                p["category"],
-            ),
-        )
-        inserted += 1
-        
+        products_data.append((
+            p["product_id"], p["product_name"], p["price"], p["promotion"],
+            p["shelf_id"], p["shelf_stock"], p["warehouse_stock"], p["category"]
+        ))
         for _ in range(p["shelf_stock"]):
             rfid = f"RFID-{uuid.uuid4().hex[:8].upper()}"
-            cursor.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, p["product_id"]))
+            rfids_data.append((rfid, p["product_id"]))
 
-    # --- Seed other catalog entities (example data) ---
-
-    cursor.execute(
+    conn.executemany(
         '''
-        INSERT OR REPLACE INTO users (user_id, cart_id, wish_list)
-        VALUES
-            ('USR-001', NULL, '["FRU-0002", "BRK-1003", "SNK-4003"]'),
-            ('USR-002', NULL, '["HYG-2002", "BEV-3002"]')
-        '''
+        INSERT OR REPLACE INTO products (
+            product_id, product_name, price, promotion,
+            shelf_id, shelf_stock, warehouse_stock, category
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', products_data
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", 
+        rfids_data
     )
 
-    carts_values = ",\n            ".join([f"('CRT-{str(i).zfill(3)}', NULL, '[]', '[]', '[]', NULL)" for i in range(1, 16)])
-    cursor.execute(
-        f'''
-        INSERT OR REPLACE INTO carts (cart_id, user_id, shopping_list, wish_list, scanned_rfids, connection_time)
-        VALUES
-            {carts_values}
-        '''
-    )
+def seed_other_entities(conn):
+    """Inizializza entità aggiuntive tramite query parametrizzate, per scongiurare SQL Injection."""
+    users_data = [
+        ('USR-001', None, '["FRU-0002", "BRK-1003", "SNK-4003"]'),
+        ('USR-002', None, '["HYG-2002", "BEV-3002"]')
+    ]
+    conn.executemany("INSERT OR REPLACE INTO users (user_id, cart_id, wish_list) VALUES (?, ?, ?)", users_data)
 
-    cursor.execute(
-        '''
-        INSERT OR REPLACE INTO shelves (shelf_id, shelf_type, temperature_threshold, product_ids, max_capacity, proportions)
-        VALUES
-            ('S-FR-1', 'Fresh Produce', 8.0, '["FRU-0001", "FRU-0002"]', 100, '{"FRU-0001": 0.5, "FRU-0002": 0.5}'),
-            ('S-FR-2', 'Fresh Produce', 8.0, '["FRU-0003"]', 50, '{"FRU-0003": 1.0}'),
-            ('S-BR-1', 'Dry Food', 22.0, '["BRK-1001", "BRK-1002"]', 60, '{"BRK-1001": 0.6, "BRK-1002": 0.4}'),
-            ('S-BR-2', 'Dry Food', 22.0, '["BRK-1003"]', 40, '{"BRK-1003": 1.0}'),
-            ('S-HY-1', 'Hygiene', 25.0, '["HYG-2001", "HYG-2002"]', 80, '{"HYG-2001": 0.5, "HYG-2002": 0.5}'),
-            ('S-HY-2', 'Hygiene', 25.0, '["HYG-2003"]', 75, '{"HYG-2003": 1.0}'),
-            ('S-BE-1', 'Beverages', 18.0, '["BEV-3001", "BEV-3002"]', 150, '{"BEV-3001": 0.6, "BEV-3002": 0.4}'),
-            ('S-BE-2', 'Beverages', 18.0, '["BEV-3003"]', 50, '{"BEV-3003": 1.0}'),
-            ('S-SN-1', 'Snacks', 22.0, '["SNK-4001", "SNK-4002"]', 80, '{"SNK-4001": 0.5, "SNK-4002": 0.5}'),
-            ('S-SN-2', 'Snacks', 22.0, '["SNK-4003"]', 40, '{"SNK-4003": 1.0}'),
-            ('S-FZ-1', 'Frozen', -18.0, '["FRZ-5001", "FRZ-5002"]', 60, '{"FRZ-5001": 0.5, "FRZ-5002": 0.5}'),
-            ('S-BK-1', 'Bakery', 22.0, '["BAK-6001", "BAK-6002"]', 50, '{"BAK-6001": 0.5, "BAK-6002": 0.5}')
-        '''
-    )
+    carts_data = [(f"CRT-{str(i).zfill(3)}", None, "[]", "[]", "[]", None) for i in range(1, 16)]
+    conn.executemany("INSERT OR REPLACE INTO carts (cart_id, user_id, shopping_list, wish_list, scanned_rfids, connection_time) VALUES (?, ?, ?, ?, ?, ?)", carts_data)
 
-    cursor.execute(
-        '''
-        INSERT OR REPLACE INTO robots (robot_id, in_use)
-        VALUES
-            ('ROB-001', 0),
-            ('ROB-002', 1)
-        '''
-    )
+    shelves_data = [
+        ('S-FR-1', 'Fresh Produce', 8.0, '["FRU-0001", "FRU-0002"]', 100, '{"FRU-0001": 0.5, "FRU-0002": 0.5}'),
+        ('S-FR-2', 'Fresh Produce', 8.0, '["FRU-0003"]', 50, '{"FRU-0003": 1.0}'),
+        ('S-BR-1', 'Dry Food', 22.0, '["BRK-1001", "BRK-1002"]', 60, '{"BRK-1001": 0.6, "BRK-1002": 0.4}'),
+        ('S-BR-2', 'Dry Food', 22.0, '["BRK-1003"]', 40, '{"BRK-1003": 1.0}'),
+        ('S-HY-1', 'Hygiene', 25.0, '["HYG-2001", "HYG-2002"]', 80, '{"HYG-2001": 0.5, "HYG-2002": 0.5}'),
+        ('S-HY-2', 'Hygiene', 25.0, '["HYG-2003"]', 75, '{"HYG-2003": 1.0}'),
+        ('S-BE-1', 'Beverages', 18.0, '["BEV-3001", "BEV-3002"]', 150, '{"BEV-3001": 0.6, "BEV-3002": 0.4}'),
+        ('S-BE-2', 'Beverages', 18.0, '["BEV-3003"]', 50, '{"BEV-3003": 1.0}'),
+        ('S-SN-1', 'Snacks', 22.0, '["SNK-4001", "SNK-4002"]', 80, '{"SNK-4001": 0.5, "SNK-4002": 0.5}'),
+        ('S-SN-2', 'Snacks', 22.0, '["SNK-4003"]', 40, '{"SNK-4003": 1.0}'),
+        ('S-FZ-1', 'Frozen', -18.0, '["FRZ-5001", "FRZ-5002"]', 60, '{"FRZ-5001": 0.5, "FRZ-5002": 0.5}'),
+        ('S-BK-1', 'Bakery', 22.0, '["BAK-6001", "BAK-6002"]', 50, '{"BAK-6001": 0.5, "BAK-6002": 0.5}')
+    ]
+    conn.executemany("INSERT OR REPLACE INTO shelves (shelf_id, shelf_type, temperature_threshold, product_ids, max_capacity, proportions) VALUES (?, ?, ?, ?, ?, ?)", shelves_data)
 
-    cursor.execute('DELETE FROM transactions')
+    robots_data = [
+        ('ROB-001', 0),
+        ('ROB-002', 1)
+    ]
+    conn.executemany("INSERT OR REPLACE INTO robots (robot_id, in_use) VALUES (?, ?)", robots_data)
 
-    # Initial RFIDs are now generated dynamically during product insertion.
+    conn.execute('DELETE FROM transactions')
 
-    conn.commit()
+def create_db():
+    """Punto di ingresso che orchestra la creazione."""
+    if os.path.exists(DB_FILENAME):
+        os.remove(DB_FILENAME)
 
-    cursor.execute('SELECT COUNT(*) FROM products')
-    count = cursor.fetchone()[0]
+    # Il context manager "with" esegue automaticamente il commit e chiude la 
+    # connessione anche in caso di eccezioni (best practice Python).
+    with sqlite3.connect(DB_FILENAME) as conn:
+        create_schema(conn)
+        seed_products(conn)
+        seed_other_entities(conn)
 
-    print(f"Catalog creation complete: {count} products stored in SQL (no JSON needed).")
-
-    conn.close()
+        count = conn.execute('SELECT COUNT(*) FROM products').fetchone()[0]
+        print(f"Catalog creation complete: {count} products stored in SQL (no JSON needed).")
 
 if __name__ == '__main__':
     create_db()
