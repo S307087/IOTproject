@@ -3,8 +3,11 @@ import requests
 import json
 from smartmarket_MQTT import MyMQTT
 
-REST_API_URL = "http://localhost:8080"
-BROKER = "localhost"
+import os
+
+CATALOG_API_HOST = os.environ.get("CATALOG_API_HOST", "localhost")
+REST_API_URL = f"http://{CATALOG_API_HOST}:8080"
+BROKER = os.environ.get("MQTT_BROKER_HOST", "localhost")
 PORT = 1883
 
 class AlertNotifier:

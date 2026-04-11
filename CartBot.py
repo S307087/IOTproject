@@ -107,7 +107,7 @@ class CartNotifier:
             )
 
 notifier = CartNotifier()
-mqtt_client = MyMQTT("CartBotClient", "localhost", 1883, notifier=notifier)
+mqtt_client = MyMQTT("CartBotClient", os.environ.get("MQTT_BROKER_HOST", "localhost"), 1883, notifier=notifier)
 
 
 def get_db_connection():

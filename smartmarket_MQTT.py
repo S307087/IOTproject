@@ -1,5 +1,6 @@
 import json
 import paho.mqtt.client as PahoMQTT
+import os
 
 
 class MyMQTT:
@@ -8,6 +9,8 @@ class MyMQTT:
                  service_name=None, keepalive=60, clean_session=True):
 
         # Salvo i parametri principali del client
+        if broker is None or broker == "localhost":
+            broker = os.environ.get("MQTT_BROKER_HOST", "localhost")
         self.broker = broker
         self.port = port
         self.notifier = notifier

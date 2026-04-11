@@ -87,7 +87,7 @@ class UserNotifier:
             )
 
 notifier = UserNotifier()
-mqtt_client = MyMQTT("UserBotClient", "localhost", 1883, notifier=notifier)
+mqtt_client = MyMQTT("UserBotClient", os.environ.get("MQTT_BROKER_HOST", "localhost"), 1883, notifier=notifier)
 event_loop = None
 import asyncio
 
