@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "1884:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  node-red:
+    image: nodered/node-red:latest
+    ports:
+      - "1880:1880"
+    environment:
+      - TZ=Europe/Rome
+    volumes:
+      - node_red_data:/data
+    restart: unless-stopped
+
+  catalog_api:
+    build: .
+    command: python CatalogAPI.py
+    volumes:
+      - .:/app
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+
+  user_bot:
+    build: .
+    command: python UserBot.py
+    volumes:
+      - .:/app
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+    depends_on:
+      - mosquitto
+      - catalog_api
+    restart: unless-stopped
+
+  cart_bot:
+    build: .
+    command: python CartBot.py
+    volumes:
+      - .:/app
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+    depends_on:
+      - mosquitto
+      - catalog_api
+    restart: unless-stopped
+
+  staff_bot:
+    build: .
+    command: python StaffBot.py
+    volumes:
+      - .:/app
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+    depends_on:
+      - mosquitto
+      - catalog_api
+    restart: unless-stopped
+
+  alert_system:
+    build: .
+    command: python AlertSystem.py
+    volumes:
+      - .:/app
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - CATALOG_API_HOST=catalog_api
+    depends_on:
+      - mosquitto
+      - catalog_api
+    restart: unless-stopped
+
+  smart_shelf:
+    build: .
+    command: python SmartShelf.py S-FR-1
+    stdin_open: true # Allows Interactive session
+    tty: true        # Required for SmartShelf input() shell
+    volumes:
+      - .:/app
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - CATALOG_API_HOST=catalog_api
+    depends_on:
+      - mosquitto
+      - catalog_api
+    restart: unless-stopped
+
+volumes:
+  node_red_data:

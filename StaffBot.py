@@ -61,8 +61,9 @@ class StaffNotifier:
                 except Exception as e:
                     print(f"Failed to send alert: {e}")
 
+import os
 notifier = StaffNotifier()
-mqtt_client = MyMQTT("StaffBotClient", "localhost", 1883, notifier=notifier)
+mqtt_client = MyMQTT("StaffBotClient", os.environ.get("MQTT_BROKER_HOST", "localhost"), 1883, notifier=notifier)
 event_loop = None
 
 # Enable logging
