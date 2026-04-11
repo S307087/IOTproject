@@ -10,4 +10,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Default command (will be overridden by Docker Compose usually)
-CMD ["python", "run_all.py"]
+CMD ["python"]
