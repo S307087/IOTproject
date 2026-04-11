@@ -177,12 +177,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     welcome_text = (
         f"👋 <b>Hi {user.mention_html()}!</b>\n\n"
-        "Welcome to the <b>Market Bot</b>! 🛒✨\n\n"
-        "How can I help you today?\n"
-        "• Click <b>Browse Market</b> to see categories\n"
-        "• Click <b>Search Product</b> to find something specific\n"
-        "• Click <b>My Wishlist</b> to see your saved items\n\n"
-        "<i>Enjoy your shopping!</i>"
+        "Welcome to the <b>Market Bot</b> 🛒✨\n\n"
+        "Here is what you can do with this bot:\n"
+        "• <b>Browse Market</b>: Explore all our products organized by category.\n"
+        "• <b>Search Product</b>: Instantly look up any items you need.\n"
+        "• <b>My Wishlist</b>: Save and manage your favorite products.\n"
+        "• <b>Connect to Cart</b>: Pair your app with a physical smart cart.\n"
+        "• <b>Disconnect</b>: Safely detach from the physical cart.\n\n"
+        "<i>Enjoy your shopping experience!</i>"
     )
     await update.message.reply_html(welcome_text, reply_markup=MAIN_MENU_KBD)
 

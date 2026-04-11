@@ -82,6 +82,7 @@ ID, NAME, PRICE, CATEGORY, SHELF = range(5)
 STOCK_SHELF, STOCK_WAREHOUSE = range(5, 7)
 PROMO_PCT = 7
 CONFIRM_DELETE = 8
+SHELF_CAPACITY, SHELF_TEMP = 9, 10
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)
@@ -115,23 +116,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
     reply_keyboard = [
-        ["📂 Browse Catalog", "🚨 Active Alerts"],
-        ["➕ Add Product", "📦 Quick View"],
+        ["🚨 Active Alerts", "📦 Quick View"],
+        ["📂 Browse Catalog", "➕ Add Product"],
         ["📈 Update Stock", "🔥 Manage Promo"],
-        ["❌ Delete Product"]
+        ["🛒 Manage Carts", "🗄️ Manage Shelves"],
+        ["🤖 Manage Robots", "❌ Delete Product"]
     ]
     
+    user = update.effective_user
     welcome_text = (
-        "🛠️ **Staff Management Menu** 🛠️\n\n"
-        "Welcome Admin. Use the buttons below or the commands to manage the market catalog:\n\n"
-        "✨ **Product Management**\n"
-        "• /add - Follow instructions to add a new item\n"
-        "• /delete <ID> - Remove an item from the database\n\n"
-        "📊 **Inventory & Marketing**\n"
-        "• /stock <ID> <shelf> <warehouse> - Update quantities\n"
-        "• /promo <ID> <%> - Set discount percentage\n\n"
-        "🔍 **Lookup**\n"
-        "• /view <ID> - See full technical details"
+        f"🛠️ **Staff Management Menu** 🛠️\n\n"
+        f"Welcome **{user.first_name}**. Use the interactive menu below to oversee the market system:\n\n"
+        "📦 **Manage Products**\n"
+        "• Add, delete, and browse products in the catalog.\n"
+        "• Update stock quantities or set promotional discounts.\n\n"
+        "🛒 **Manage Carts**\n"
+        "• View all physical carts and their current status.\n\n"
+        "🗄️ **Manage Shelves**\n"
+        "• Check shelf contents and adjust maximum capacities or temperatures.\n\n"
+        "🤖 **Manage Robots**\n"
+        "• Monitor autonomous robots and toggle their active status.\n\n"
+        "🚨 **Active Alerts**\n"
+        "• View recent real-time notifications (e.g., low stock warnings)."
     )
     
     await update.message.reply_text(
@@ -147,7 +153,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     text = update.message.text
     
     # Reset search state on any valid menu button press
-    if text in ["➕ Add Product", "📂 Browse Catalog", "🚨 Active Alerts", "📦 Quick View", "📈 Update Stock", "🔥 Manage Promo", "❌ Delete Product"]:
+    if text in ["➕ Add Product", "📂 Browse Catalog", "🚨 Active Alerts", "📦 Quick View", "📈 Update Stock", "🔥 Manage Promo", "❌ Delete Product", "🛒 Manage Carts", "🗄️ Manage Shelves", "🤖 Manage Robots"]:
         context.user_data['staff_awaiting_search'] = False
 
     if text == "➕ Add Product":
@@ -156,6 +162,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return await browse_categories(update, context)
     elif text == "🚨 Active Alerts":
         return await show_active_alerts(update, context)
+    elif text == "🛒 Manage Carts":
+        return await browse_carts(update, context)
+    elif text == "🗄️ Manage Shelves":
+        return await browse_shelves(update, context)
+    elif text == "🤖 Manage Robots":
+        return await browse_robots(update, context)
     elif text == "📦 Quick View":
         await update.message.reply_text("Usage: /view <ID> or browse/search for a product.")
     elif text == "📈 Update Stock":
@@ -195,6 +207,65 @@ async def search_staff_products(update: Update, context: ContextTypes.DEFAULT_TY
         keyboard.append([InlineKeyboardButton(f"{p['product_name']} [{p['product_id']}]{promo_tag}", callback_data=f"staff_prod_{p['product_id']}")])
     
     await update.message.reply_html(f"✅ Found {len(results)} results for '<b>{query_text}</b>':", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def browse_carts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    conn = get_db_connection()
+    carts = conn.execute('SELECT cart_id, user_id FROM carts').fetchall()
+    conn.close()
+
+    if not carts:
+        await update.message.reply_text("No carts found in the database!")
+        return
+
+    keyboard = []
+    row = []
+    for c in carts:
+        status = "🟢" if c['user_id'] else "🔴"
+        row.append(InlineKeyboardButton(f"{status} {c['cart_id']}", callback_data=f"staff_cart_{c['cart_id']}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    await update.message.reply_text("🛒 **Carts Status**\n🟢 = In Use | 🔴 = Empty/Available\nSelect a cart:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+async def browse_shelves(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    conn = get_db_connection()
+    shelves = conn.execute('SELECT shelf_id, shelf_type FROM shelves').fetchall()
+    conn.close()
+
+    if not shelves:
+        await update.message.reply_text("No shelves found in the database!")
+        return
+
+    keyboard = []
+    row = []
+    for s in shelves:
+        row.append(InlineKeyboardButton(f"{s['shelf_id']} ({s['shelf_type']})", callback_data=f"staff_shelf_{s['shelf_id']}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    await update.message.reply_text("🗄️ **Shelves**\nSelect a shelf:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+async def browse_robots(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    conn = get_db_connection()
+    robots = conn.execute('SELECT robot_id, in_use FROM robots').fetchall()
+    conn.close()
+
+    if not robots:
+        await update.message.reply_text("No robots found in the database!")
+        return
+
+    keyboard = []
+    for r in robots:
+        status = "🚚 Moving" if r['in_use'] else "✅ Available"
+        keyboard.append([InlineKeyboardButton(f"🤖 {r['robot_id']} - {status}", callback_data=f"staff_rob_{r['robot_id']}")])
+
+    await update.message.reply_text("🤖 **Robots Status**\nSelect a robot:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 # --- Browsing & Interaction ---
 
@@ -339,6 +410,85 @@ async def staff_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['pid'] = pid
         await query.message.reply_text(f"Updating Stock for **{pid}**.\nEnter new Shelf Stock:")
         return STOCK_SHELF # This will trigger the ConversationHandler if it's an entry point
+
+    elif data.startswith("staff_cart_"):
+        cid = data.split("_", 2)[2]
+        await show_staff_cart_view(query, cid)
+
+    elif data.startswith("staff_shelf_"):
+        sid = data.split("_", 2)[2]
+        await show_staff_shelf_view(query, sid)
+
+    elif data.startswith("staff_rob_"):
+        rid = data.split("_", 2)[2]
+        await show_staff_robot_view(query, rid)
+
+    elif data.startswith("toggle_rob_"):
+        rid = data.split("_", 2)[2]
+        conn = get_db_connection()
+        r = conn.execute("SELECT in_use FROM robots WHERE robot_id=?", (rid,)).fetchone()
+        if r:
+            new_status = 0 if r['in_use'] else 1
+            conn.execute("UPDATE robots SET in_use=? WHERE robot_id=?", (new_status, rid))
+            conn.commit()
+            await query.edit_message_text(f"🔄 Robot `{rid}` status toggled.")
+        conn.close()
+
+async def show_staff_cart_view(query, cid):
+    conn = get_db_connection()
+    cart = conn.execute('SELECT * FROM carts WHERE cart_id = ?', (cid,)).fetchone()
+    conn.close()
+    
+    if cart:
+        msg = (
+            f"🛒 **Cart:** `{cart['cart_id']}`\n"
+            f"👤 User: {cart['user_id'] or 'None'}\n"
+            f"🛍️ Items in cart: {len(json.loads(cart['shopping_list'] or '[]'))}\n"
+            f"📡 Scanned RFIDs: {len(json.loads(cart['scanned_rfids'] or '[]'))}\n"
+            f"⏱️ Connected since: {cart['connection_time'] or 'N/A'}"
+        )
+        await query.edit_message_text(msg, parse_mode='Markdown')
+    else:
+        await query.edit_message_text("Error: Cart not found.")
+
+async def show_staff_shelf_view(query, sid):
+    conn = get_db_connection()
+    shelf = conn.execute('SELECT * FROM shelves WHERE shelf_id = ?', (sid,)).fetchone()
+    conn.close()
+    
+    if shelf:
+        msg = (
+            f"🗄️ **Shelf:** `{shelf['shelf_id']}`\n"
+            f"🏷️ Type: {shelf['shelf_type']}\n"
+            f"🌡️ Temp Threshold: {shelf['temperature_threshold']}°C\n"
+            f"📦 Max Capacity: {shelf['max_capacity']}\n"
+            f"📑 Products: {len(json.loads(shelf['product_ids'] or '[]'))}"
+        )
+        keyboard = [
+            [InlineKeyboardButton("✏️ Edit Max Cap", callback_data=f"edit_shelf_cap_{sid}"),
+             InlineKeyboardButton("🌡️ Edit Temp", callback_data=f"edit_shelf_temp_{sid}")]
+        ]
+        await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await query.edit_message_text("Error: Shelf not found.")
+
+async def show_staff_robot_view(query, rid):
+    conn = get_db_connection()
+    robot = conn.execute('SELECT * FROM robots WHERE robot_id = ?', (rid,)).fetchone()
+    conn.close()
+    
+    if robot:
+        status = "🚚 Moving (In Use)" if robot['in_use'] else "✅ Available"
+        msg = (
+            f"🤖 **Robot:** `{robot['robot_id']}`\n"
+            f"📊 Status: {status}"
+        )
+        keyboard = [
+            [InlineKeyboardButton("🔄 Toggle Status", callback_data=f"toggle_rob_{rid}")]
+        ]
+        await query.edit_message_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await query.edit_message_text("Error: Robot not found.")
 
 async def show_staff_product_view(query_or_update, pid):
     conn = get_db_connection()
@@ -735,6 +885,50 @@ async def finalize_checkout(cart_id: str, update: Update, context: ContextTypes.
         
     await update.message.reply_text(f"✅ Payment registered successfully!\nTransaction: {payment_id}\nTotal: €{total_amount:.2f}\nUser disconnected and cart emptied.")
 
+async def edit_shelf_cap_start_btn(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    sid = query.data.split("_", 3)[3]
+    context.user_data['sid'] = sid
+    await query.message.reply_text(f"Updating Capacity for `{sid}`.\nEnter new maximum capacity:")
+    return SHELF_CAPACITY
+
+async def edit_shelf_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        cap = int(update.message.text)
+        sid = context.user_data['sid']
+        conn = get_db_connection()
+        conn.execute('UPDATE shelves SET max_capacity = ? WHERE shelf_id = ?', (cap, sid))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"✅ Max capacity for {sid} updated to {cap}!")
+        return ConversationHandler.END
+    except ValueError:
+        await update.message.reply_text("Invalid number. Please enter an integer:")
+        return SHELF_CAPACITY
+
+async def edit_shelf_temp_start_btn(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    sid = query.data.split("_", 3)[3]
+    context.user_data['sid'] = sid
+    await query.message.reply_text(f"Updating Temperature for `{sid}`.\nEnter new temperature threshold:")
+    return SHELF_TEMP
+
+async def edit_shelf_temp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try:
+        temp = float(update.message.text.replace(',', '.'))
+        sid = context.user_data['sid']
+        conn = get_db_connection()
+        conn.execute('UPDATE shelves SET temperature_threshold = ? WHERE shelf_id = ?', (temp, sid))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"✅ Temperature threshold for {sid} updated to {temp}°C!")
+        return ConversationHandler.END
+    except ValueError:
+        await update.message.reply_text("Invalid number. Please enter a number:")
+        return SHELF_TEMP
+
 def main() -> None:
     """Start the bot."""
     
@@ -758,7 +952,9 @@ def main() -> None:
             CommandHandler("add", add_start),
             CallbackQueryHandler(edit_stock_start_btn, pattern=r"^edit_stock_"),
             CallbackQueryHandler(edit_promo_start_btn, pattern=r"^edit_promo_"),
-            CallbackQueryHandler(delete_confirm_start, pattern=r"^staff_del_")
+            CallbackQueryHandler(delete_confirm_start, pattern=r"^staff_del_"),
+            CallbackQueryHandler(edit_shelf_cap_start_btn, pattern=r"^edit_shelf_cap_"),
+            CallbackQueryHandler(edit_shelf_temp_start_btn, pattern=r"^edit_shelf_temp_")
         ],
         states={
             ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_id)],
@@ -770,6 +966,8 @@ def main() -> None:
             STOCK_WAREHOUSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_stock_warehouse)],
             PROMO_PCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_promo_pct)],
             CONFIRM_DELETE: [CallbackQueryHandler(delete_execute, pattern=r"^staff_del_confirm$")],
+            SHELF_CAPACITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_shelf_capacity)],
+            SHELF_TEMP: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_shelf_temp)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         allow_reentry=True
