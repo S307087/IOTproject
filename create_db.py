@@ -346,7 +346,7 @@ def seed_realistic_transactions(conn):
         ("BAK-6001", 1.89), ("BAK-6002", 2.59)
     ]
 
-    for _ in range(50):
+    for _ in range(1000):
         t_date = base_date + datetime.timedelta(days=random.randint(0, 30), hours=random.randint(8, 19), minutes=random.randint(0, 59))
         num_items = random.randint(1, 8)
         purchased_items = random.choices(products, k=num_items)

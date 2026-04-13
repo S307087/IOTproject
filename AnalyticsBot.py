@@ -42,14 +42,14 @@ def run_local_analytics():
     total_dwell_time = 0
     
     product_performance = {} # Conta vendite per ID prodotto
+    pair_performance = {} # Conta vendite abbinate (Market Basket)
     
     # 4 Fasce orarie (8-11, 11-14, 14-17, 17-20) come richiesto
     time_slots = {
         "08:00 - 11:00": 0,
         "11:00 - 14:00": 0,
         "14:00 - 17:00": 0,
-        "17:00 - 20:00": 0,
-        "Altre Ore (Fuori Orario)": 0
+        "17:00 - 20:00": 0
     }
     
     for tx in transactions:
@@ -62,6 +62,13 @@ def run_local_analytics():
             total_items += len(items)
             for item in items:
                 product_performance[item] = product_performance.get(item, 0) + 1
+            
+            # Market Basket Analysis (Algoritmo di associazione per coppie frequenti)
+            unique_items = list(set(items))
+            for i in range(len(unique_items)):
+                for j in range(i + 1, len(unique_items)):
+                    pair = tuple(sorted([unique_items[i], unique_items[j]]))
+                    pair_performance[pair] = pair_performance.get(pair, 0) + 1
         except Exception:
             pass
             
@@ -74,7 +81,6 @@ def run_local_analytics():
                 elif 11 <= hour < 14: time_slots["11:00 - 14:00"] += 1
                 elif 14 <= hour < 17: time_slots["14:00 - 17:00"] += 1
                 elif 17 <= hour < 20: time_slots["17:00 - 20:00"] += 1
-                else: time_slots["Altre Ore (Fuori Orario)"] += 1
             except Exception:
                 pass
 
@@ -107,6 +113,24 @@ def run_local_analytics():
     print("\n--- 4. AFFLUENZA ORARIA (Acquirenti) ---")
     for slot, count in time_slots.items():
         print(f"Fascia {slot} -> {count} acquirenti")
+
+    print("\n--- 5. MARKET BASKET ANALYSIS (Top 5 Abbinamenti) ---")
+    sorted_pairs = sorted(pair_performance.items(), key=lambda x: x[1], reverse=True)
+    top_pairs_names = []
+    top_pairs_counts = []
+    
+    if sorted_pairs:
+        for i, (pair, count) in enumerate(sorted_pairs[:5]):
+            p1_row = cursor.execute("SELECT product_name FROM products WHERE product_id=?", (pair[0],)).fetchone()
+            p2_row = cursor.execute("SELECT product_name FROM products WHERE product_id=?", (pair[1],)).fetchone()
+            name1 = p1_row['product_name'] if p1_row else "Sconosciuto"
+            name2 = p2_row['product_name'] if p2_row else "Sconosciuto"
+            combo_name = f"{name1} + {name2}"
+            top_pairs_names.append(combo_name)
+            top_pairs_counts.append(count)
+            print(f" {i+1}. {combo_name} -> Comprati insieme {count} volte")
+    else:
+        print(" Nessuna correlazione trovata negli acquisti passati.")
 
     top_product_names = []
     top_product_counts = []
@@ -273,6 +297,15 @@ def run_local_analytics():
                 </div>
             </div>
         </div>
+
+        <div class="grid-2" style="margin-top: 20px;">
+            <div class="card animate d-3">
+                <h3>Market Basket Analysis (Bought Together)</h3>
+                <div class="chart-container" style="height: 250px;">
+                    <canvas id="basketChart"></canvas>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -321,6 +354,30 @@ def run_local_analytics():
                     label: 'Units Sold',
                     data: topProductsData,
                     backgroundColor: ['#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'],
+                    borderRadius: 6
+                }}]
+            }},
+            options: {{
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {{ legend: {{ display: false }} }},
+                scales: {{
+                    x: {{ beginAtZero: true, grid: {{ color: 'rgba(255,255,255,0.05)' }} }},
+                    y: {{ grid: {{ display: false }} }}
+                }}
+            }}
+        }});        const basketLabels = {json.dumps(top_pairs_names)};
+        const basketData = {json.dumps(top_pairs_counts)};
+
+        new Chart(document.getElementById('basketChart'), {{
+            type: 'bar',
+            data: {{
+                labels: basketLabels,
+                datasets: [{{
+                    label: 'Times Bought Together',
+                    data: basketData,
+                    backgroundColor: ['#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fdf2f8'],
                     borderRadius: 6
                 }}]
             }},

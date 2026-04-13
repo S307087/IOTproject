@@ -114,30 +114,30 @@
         <div class="grid-4">
             <div class="card animate d-1">
                 <h3>Total Transactions</h3>
-                <p class="value">50</p>
+                <p class="value">1000</p>
             </div>
             <div class="card animate d-1">
                 <h3>Articles Sold</h3>
-                <p class="value">236</p>
+                <p class="value">4502</p>
             </div>
             <div class="card animate d-2">
                 <h3>Total Revenue</h3>
-                <p class="value">€608.48</p>
+                <p class="value">€11321.46</p>
             </div>
             <div class="card animate d-2">
                 <h3>Avg. Revenue / Tx</h3>
-                <p class="value">€12.17</p>
+                <p class="value">€11.32</p>
             </div>
         </div>
         
         <div class="grid-4">
             <div class="card animate d-3">
                 <h3>Average Dwell Time</h3>
-                <p class="value">15.5 <span>min / user</span></p>
+                <p class="value">15.8 <span>min / user</span></p>
             </div>
              <div class="card animate d-3">
                 <h3>Monetization Rate</h3>
-                <p class="value">€39.15 <span>/ min</span></p>
+                <p class="value">€715.29 <span>/ min</span></p>
             </div>
         </div>
 
@@ -155,11 +155,20 @@
                 </div>
             </div>
         </div>
+
+        <div class="grid-2" style="margin-top: 20px;">
+            <div class="card animate d-3">
+                <h3>Market Basket Analysis (Bought Together)</h3>
+                <div class="chart-container" style="height: 250px;">
+                    <canvas id="basketChart"></canvas>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
-        const footfallLabels = ["08:00 - 11:00", "11:00 - 14:00", "14:00 - 17:00", "17:00 - 20:00", "Altre Ore (Fuori Orario)"];
-        const footfallData = [12, 9, 14, 15, 0];
+        const footfallLabels = ["08:00 - 11:00", "11:00 - 14:00", "14:00 - 17:00", "17:00 - 20:00"];
+        const footfallData = [263, 239, 241, 257];
         
         Chart.defaults.color = '#cbd5e1';
         Chart.defaults.font.family = 'Inter';
@@ -192,8 +201,8 @@
             }
         });
 
-        const topProductsLabels = ["Shower Gel 500ml", "Apples Gala 1kg", "Classic Potato Chips 200g", "Frozen Mixed Vegetables 1kg", "Frozen Margherita Pizza"];
-        const topProductsData = [18, 16, 16, 16, 15];
+        const topProductsLabels = ["Laundry Detergent 2L", "Wholemeal Bread 500g", "Orange Juice 1L", "Classic Potato Chips 200g", "Protein Bar Chocolate"];
+        const topProductsData = [257, 255, 253, 253, 251];
 
         new Chart(document.getElementById('productsChart'), {
             type: 'bar',
@@ -203,6 +212,30 @@
                     label: 'Units Sold',
                     data: topProductsData,
                     backgroundColor: ['#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });        const basketLabels = ["Bananas 1kg + Apples Gala 1kg", "Apples Gala 1kg + Cherry Tomatoes 500g", "Cola Zero 1L + Orange Juice 1L", "Wholemeal Bread 500g + Classic Potato Chips 200g", "Wholemeal Bread 500g + Laundry Detergent 2L"];
+        const basketData = [61, 61, 60, 60, 59];
+
+        new Chart(document.getElementById('basketChart'), {
+            type: 'bar',
+            data: {
+                labels: basketLabels,
+                datasets: [{
+                    label: 'Times Bought Together',
+                    data: basketData,
+                    backgroundColor: ['#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fdf2f8'],
                     borderRadius: 6
                 }]
             },
