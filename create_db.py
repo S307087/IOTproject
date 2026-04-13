@@ -1,6 +1,9 @@
 import sqlite3
 import os
 import uuid
+import random
+import datetime
+import json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILENAME = os.path.join(BASE_DIR, 'catalog.db')
@@ -323,16 +326,74 @@ def seed_other_entities(conn):
 
     robots_data = [
         ('ROB-001', 0),
-        ('ROB-002', 1)
+        ('ROB-002', 0),
+        ('ROB-003', 0)
     ]
     conn.executemany("INSERT OR REPLACE INTO robots (robot_id, in_use) VALUES (?, ?)", robots_data)
 
-    conn.execute('DELETE FROM transactions')
+def seed_realistic_transactions(conn):
+    """Seed historical realistic transactions data if empty."""
+    transactions_data = []
+    base_date = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - datetime.timedelta(days=30)
+    
+    products = [
+        ("FRU-0001", 1.99), ("FRU-0002", 2.24), ("FRU-0003", 1.79),
+        ("BRK-1001", 2.97), ("BRK-1002", 4.99), ("BRK-1003", 3.11),
+        ("HYG-2001", 2.59), ("HYG-2002", 1.89), ("HYG-2003", 6.49),
+        ("BEV-3001", 0.39), ("BEV-3002", 1.07), ("BEV-3003", 1.49),
+        ("SNK-4001", 1.79), ("SNK-4002", 2.15), ("SNK-4003", 1.95),
+        ("FRZ-5001", 3.79), ("FRZ-5002", 2.89),
+        ("BAK-6001", 1.89), ("BAK-6002", 2.59)
+    ]
+
+    for _ in range(50):
+        t_date = base_date + datetime.timedelta(days=random.randint(0, 30), hours=random.randint(8, 19), minutes=random.randint(0, 59))
+        num_items = random.randint(1, 8)
+        purchased_items = random.choices(products, k=num_items)
+        
+        total_amount = sum(item[1] for item in purchased_items)
+        product_ids = [item[0] for item in purchased_items]
+        
+        payment_id = f"PAY-{uuid.uuid4().hex[:8].upper()}"
+        user_id = f"USR-{random.randint(100, 999)}" if random.random() > 0.3 else "GUEST"
+        dwell_time = random.randint(120, 1800) # 2 mins to 30 mins
+        
+        transactions_data.append((
+            payment_id,
+            user_id,
+            round(total_amount, 2),
+            json.dumps(product_ids),
+            dwell_time,
+            t_date.strftime("%Y-%m-%d %H:%M:%S")
+        ))
+        
+    conn.executemany(
+        '''
+        INSERT INTO transactions (payment_id, user_id, total_amount, product_list, dwell_time_seconds, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', transactions_data
+    )
 
 def create_db():
     """Punto di ingresso che orchestra la creazione."""
+    existing_transactions = []
     if os.path.exists(DB_FILENAME):
-        os.remove(DB_FILENAME)
+        try:
+            with sqlite3.connect(DB_FILENAME) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT payment_id, user_id, total_amount, product_list, dwell_time_seconds, timestamp FROM transactions")
+                existing_transactions = cursor.fetchall()
+        except sqlite3.Error:
+            pass
+        try:
+            with sqlite3.connect(DB_FILENAME) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name != 'sqlite_sequence'")
+                tables = cursor.fetchall()
+                for table_name in tables:
+                    cursor.execute(f"DROP TABLE IF EXISTS {table_name[0]}")
+        except sqlite3.Error as e:
+            print(f"Error dropping existing tables: {e}")
 
     # Il context manager "with" esegue automaticamente il commit e chiude la 
     # connessione anche in caso di eccezioni (best practice Python).
@@ -340,6 +401,16 @@ def create_db():
         create_schema(conn)
         seed_products(conn)
         seed_other_entities(conn)
+
+        if existing_transactions:
+            conn.executemany('''
+                INSERT INTO transactions (payment_id, user_id, total_amount, product_list, dwell_time_seconds, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', existing_transactions)
+            print(f"Restored {len(existing_transactions)} existing transactions.")
+        else:
+            seed_realistic_transactions(conn)
+            print("Generated realistic transactions.")
 
         count = conn.execute('SELECT COUNT(*) FROM products').fetchone()[0]
         print(f"Catalog creation complete: {count} products stored in SQL (no JSON needed).")

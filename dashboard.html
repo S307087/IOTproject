@@ -114,30 +114,30 @@
         <div class="grid-4">
             <div class="card animate d-1">
                 <h3>Total Transactions</h3>
-                <p class="value">4</p>
+                <p class="value">50</p>
             </div>
             <div class="card animate d-1">
                 <h3>Articles Sold</h3>
-                <p class="value">12</p>
+                <p class="value">236</p>
             </div>
             <div class="card animate d-2">
                 <h3>Total Revenue</h3>
-                <p class="value">€25.83</p>
+                <p class="value">€608.48</p>
             </div>
             <div class="card animate d-2">
                 <h3>Avg. Revenue / Tx</h3>
-                <p class="value">€6.46</p>
+                <p class="value">€12.17</p>
             </div>
         </div>
         
         <div class="grid-4">
             <div class="card animate d-3">
                 <h3>Average Dwell Time</h3>
-                <p class="value">2.4 <span>min / user</span></p>
+                <p class="value">15.5 <span>min / user</span></p>
             </div>
              <div class="card animate d-3">
                 <h3>Monetization Rate</h3>
-                <p class="value">€10.65 <span>/ min</span></p>
+                <p class="value">€39.15 <span>/ min</span></p>
             </div>
         </div>
 
@@ -159,7 +159,7 @@
 
     <script>
         const footfallLabels = ["08:00 - 11:00", "11:00 - 14:00", "14:00 - 17:00", "17:00 - 20:00", "Altre Ore (Fuori Orario)"];
-        const footfallData = [4, 0, 0, 0, 0];
+        const footfallData = [12, 9, 14, 15, 0];
         
         Chart.defaults.color = '#cbd5e1';
         Chart.defaults.font.family = 'Inter';
@@ -192,8 +192,8 @@
             }
         });
 
-        const topProductsLabels = ["Bananas 1kg", "Toothpaste Fresh Mint", "Ground Coffee 250g"];
-        const topProductsData = [7, 3, 2];
+        const topProductsLabels = ["Shower Gel 500ml", "Apples Gala 1kg", "Classic Potato Chips 200g", "Frozen Mixed Vegetables 1kg", "Frozen Margherita Pizza"];
+        const topProductsData = [18, 16, 16, 16, 15];
 
         new Chart(document.getElementById('productsChart'), {
             type: 'bar',

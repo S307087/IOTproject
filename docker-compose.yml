@@ -83,6 +83,20 @@ services:
       - catalog_api
     restart: unless-stopped
 
+  robot_bot:
+    build: .
+    command: python RobotBot.py
+    volumes:
+      - .:/app
+    environment:
+      - TZ=Europe/Rome
+      - MQTT_BROKER_HOST=mosquitto
+      - CATALOG_API_HOST=catalog_api
+    depends_on:
+      - mosquitto
+      - catalog_api
+    restart: unless-stopped
+
   smart_shelf:
     build: .
     command: python SmartShelf.py S-FR-1

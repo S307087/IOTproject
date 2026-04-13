@@ -49,7 +49,10 @@ class AlertSystem:
             thresh = payload.get("threshold")
             self.publish_staff_alert(
                 level="WARNING",
-                msg=f"Shelf {shelf_id} is running low on {product_id}! (Current: {current}, Min: {thresh})"
+                msg=f"Shelf {shelf_id} is running low on {product_id}! (Current: {current}, Min: {thresh})",
+                event="low_stock_shelf",
+                product_id=product_id,
+                shelf_id=shelf_id
             )
             
     def process_inventory_update(self, shelf_id, rfid, action):
@@ -112,18 +115,24 @@ class AlertSystem:
                 if shelf_stock < min_threshold:
                      self.publish_staff_alert(
                         level="WARNING",
-                        msg=f"Shelf {shelf_id} is running low on {product_name}! (Current: {shelf_stock}, Min: {min_threshold})"
+                        msg=f"Shelf {shelf_id} is running low on {product_name}! (Current: {shelf_stock}, Min: {min_threshold})",
+                        event="low_stock_shelf",
+                        product_id=product_id,
+                        shelf_id=shelf_id
                     )
         except Exception as e:
             print(f"[AlertSystem] Error checking shelf thresholds: {e}")
 
-    def publish_staff_alert(self, level, msg):
+    def publish_staff_alert(self, level, msg, event=None, product_id=None, shelf_id=None):
         print(f"[AlertSystem] Emitting Alert: {level} - {msg}")
         payload = {
             "level": level,
             "message": msg,
             "timestamp": time.time()
         }
+        if event: payload["event"] = event
+        if product_id: payload["product_id"] = product_id
+        if shelf_id: payload["shelf_id"] = shelf_id
         self.mqtt_client.myPublish("staff/alerts", payload)
 
 if __name__ == "__main__":
