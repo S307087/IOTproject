@@ -105,10 +105,10 @@ def run_local_analytics():
     # Total dwell time è in secondi
     avg_dwell_sec = total_dwell_time / total_transactions if total_transactions else 0
     avg_dwell_min = avg_dwell_sec / 60.0
-    eur_per_min = total_revenue / avg_dwell_min if avg_dwell_min > 0 else 0
+    eur_per_min = avg_revenue / avg_dwell_min if avg_dwell_min > 0 else 0
     
     print(f"Permanenza Media nel Supermercato: {avg_dwell_min:.1f} minuti")
-    print(f"Media Euro spesi al minuto: €{eur_per_min:.2f} / minuto")
+    print(f"Media Euro spesi al minuto: €{eur_per_min:.2f} / minuto (per utente)")
 
     print("\n--- 4. AFFLUENZA ORARIA (Acquirenti) ---")
     for slot, count in time_slots.items():

@@ -388,6 +388,48 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=MAIN_MENU_KBD,
     )
 
+    # === RECOMMENDATION SYSTEM ===
+    try:
+        conn = get_db_connection()
+        prod_info = conn.execute("SELECT category FROM products WHERE product_id = ?", (product_id,)).fetchone()
+        category = prod_info["category"] if prod_info else None
+        
+        # 1. Market Basket Analysis (Item-based)
+        transactions = conn.execute("SELECT product_list FROM transactions").fetchall()
+        pair_counts = {}
+        for tx in transactions:
+            items = _load_json_list(tx["product_list"])
+            if product_id in items:
+                for item in items:
+                    if item != product_id and item not in shopping_list:
+                        pair_counts[item] = pair_counts.get(item, 0) + 1
+        
+        best_match = None
+        if pair_counts:
+            best_match_id = max(pair_counts, key=pair_counts.get)
+            if pair_counts[best_match_id] >= 5: # Threshold minimo di associazione
+                best_match = conn.execute("SELECT product_name, shelf_id FROM products WHERE product_id = ?", (best_match_id,)).fetchone()
+        
+        rec_msg = None
+        if best_match:
+            rec_msg = f"💡 <b>Smart Tip:</b> Chi ha comprato questo acquista spesso anche <b>{best_match['product_name']}</b> (lo trovi nello scaffale <code>{best_match['shelf_id']}</code>)!"
+        elif category:
+            # 2. Alternative: Promozione stessa categoria
+            seq = ','.join(['?'] * len(shopping_list))
+            query = f"SELECT product_name, shelf_id, promotion FROM products WHERE category = ? AND promotion > 0 AND product_id != ? AND product_id NOT IN ({seq}) LIMIT 1"
+            params = [category, product_id] + shopping_list
+            promo_item = conn.execute(query, params).fetchone()
+            if promo_item:
+                rec_msg = f"🏷️ <b>Offerta per te:</b> Nello scaffale <code>{promo_item['shelf_id']}</code> trovi un prodotto simile: <b>{promo_item['product_name']}</b> in sconto del {promo_item['promotion']}%!"
+        
+        conn.close()
+        
+        if rec_msg:
+             await update.message.reply_text(rec_msg, parse_mode='HTML')
+             
+    except Exception as e:
+        logger.error(f"Error in recommendation: {e}")
+
 async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Simulates removing an item from the cart.
