@@ -26,10 +26,18 @@ search_queries = {}
 class UserNotifier:
     def __init__(self):
         self.app = None
-        self.chat_id = None
 
     def notify(self, topic, payload):
-        if not self.app or not self.chat_id:
+        if not self.app:
+            return
+            
+        user_id = payload.get("user_id")
+        if not user_id or not user_id.startswith("USR-"):
+            return
+            
+        try:
+            target_chat_id = int(user_id.split("-")[1])
+        except ValueError:
             return
             
         event = payload.get("event")
@@ -75,14 +83,14 @@ class UserNotifier:
                 f"Thank you for shopping with us! You have been disconnected from the cart."
             )
             asyncio_run(
-                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
+                self.app.bot.send_message(chat_id=target_chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
                 event_loop
             )
         elif event == "user_disconnected":
             # The cart disconnected us
             msg = "🔌 <b>Remote Disconnect</b>\nThe cart has been disconnected or reset. Your session has ended."
             asyncio_run(
-                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
+                self.app.bot.send_message(chat_id=target_chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
                 event_loop
             )
 
@@ -163,7 +171,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         event_loop = asyncio.get_running_loop()
         
     notifier.app = context.application
-    notifier.chat_id = update.effective_chat.id
+    # We no longer store a central chat_id since notify maps dynamically
     
     user = update.effective_user
     

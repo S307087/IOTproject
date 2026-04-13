@@ -844,12 +844,13 @@ async def finalize_checkout(cart_id: str, update: Update, context: ContextTypes.
             pass
             
     # Insert Transaction
+    current_timestamp = datetime.datetime.now().isoformat()
     conn.execute(
         '''
-        INSERT INTO transactions (payment_id, user_id, total_amount, product_list, dwell_time_seconds)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO transactions (payment_id, user_id, total_amount, product_list, dwell_time_seconds, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
         ''',
-        (payment_id, user_id, total_amount, shopping_list_json, dwell_time)
+        (payment_id, user_id, total_amount, shopping_list_json, dwell_time, current_timestamp)
     )
     
     # Delete purchased RFIDs from database

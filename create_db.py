@@ -55,7 +55,8 @@ def create_schema(conn):
             user_id TEXT,
             total_amount REAL,
             product_list TEXT,          -- JSON list of product_ids
-            dwell_time_seconds INTEGER
+            dwell_time_seconds INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS rfid_tags (

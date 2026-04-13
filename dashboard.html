@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Market Analytics Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --text: #f8fafc;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --primary: #3b82f6;
+            --accent: #8b5cf6;
+        }
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            background-image: radial-gradient(circle at top right, rgba(59, 130, 246, 0.15) 0%, transparent 40%),
+                              radial-gradient(circle at bottom left, rgba(139, 92, 246, 0.15) 0%, transparent 40%);
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+            background: linear-gradient(to right, #60a5fa, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        p.subtitle {
+            color: #94a3b8;
+            margin-bottom: 40px;
+            font-weight: 300;
+        }
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+        .card h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #cbd5e1;
+        }
+        .card .value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin: 0;
+        }
+        .card .value span {
+            font-size: 1rem;
+            color: #94a3b8;
+            font-weight: 400;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        /* Micro-animations */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate {
+            animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+        }
+        .d-1 { animation-delay: 0.1s; }
+        .d-2 { animation-delay: 0.2s; }
+        .d-3 { animation-delay: 0.3s; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="animate">
+            <h1>Smart Market Analytics</h1>
+            <p class="subtitle">Real-time local database insights</p>
+        </div>
+
+        <div class="grid-4">
+            <div class="card animate d-1">
+                <h3>Total Transactions</h3>
+                <p class="value">4</p>
+            </div>
+            <div class="card animate d-1">
+                <h3>Articles Sold</h3>
+                <p class="value">12</p>
+            </div>
+            <div class="card animate d-2">
+                <h3>Total Revenue</h3>
+                <p class="value">€25.83</p>
+            </div>
+            <div class="card animate d-2">
+                <h3>Avg. Revenue / Tx</h3>
+                <p class="value">€6.46</p>
+            </div>
+        </div>
+        
+        <div class="grid-4">
+            <div class="card animate d-3">
+                <h3>Average Dwell Time</h3>
+                <p class="value">2.4 <span>min / user</span></p>
+            </div>
+             <div class="card animate d-3">
+                <h3>Monetization Rate</h3>
+                <p class="value">€10.65 <span>/ min</span></p>
+            </div>
+        </div>
+
+        <div class="grid-2" style="margin-top: 20px;">
+            <div class="card animate d-3">
+                <h3>Hourly Buyers Footfall</h3>
+                <div class="chart-container">
+                    <canvas id="footfallChart"></canvas>
+                </div>
+            </div>
+            <div class="card animate d-3">
+                <h3>Top Products Performance</h3>
+                <div class="chart-container">
+                    <canvas id="productsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const footfallLabels = ["08:00 - 11:00", "11:00 - 14:00", "14:00 - 17:00", "17:00 - 20:00", "Altre Ore (Fuori Orario)"];
+        const footfallData = [4, 0, 0, 0, 0];
+        
+        Chart.defaults.color = '#cbd5e1';
+        Chart.defaults.font.family = 'Inter';
+
+        new Chart(document.getElementById('footfallChart'), {
+            type: 'line',
+            data: {
+                labels: footfallLabels,
+                datasets: [{
+                    label: 'Buyers',
+                    data: footfallData,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                    borderWidth: 3,
+                    tension: 0.4,
+                    fill: true,
+                    pointBackgroundColor: '#8b5cf6',
+                    pointBorderColor: '#fff',
+                    pointRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+
+        const topProductsLabels = ["Bananas 1kg", "Toothpaste Fresh Mint", "Ground Coffee 250g"];
+        const topProductsData = [7, 3, 2];
+
+        new Chart(document.getElementById('productsChart'), {
+            type: 'bar',
+            data: {
+                labels: topProductsLabels,
+                datasets: [{
+                    label: 'Units Sold',
+                    data: topProductsData,
+                    backgroundColor: ['#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe'],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
