@@ -37,12 +37,22 @@ event_loop = None
 class CartNotifier:
     def __init__(self):
         self.app = None
-        self.chat_id = None
+        self.cart_to_chat = {}
         
     def notify(self, topic, payload):
-        if not self.app or not self.chat_id or not event_loop:
+        if not self.app or not event_loop:
             return
         if not payload:
+            return
+            
+        parts = topic.split('/')
+        if len(parts) >= 3 and parts[0] == "cart":
+            cart_id = parts[1]
+        else:
+            return
+            
+        chat_id = self.cart_to_chat.get(cart_id)
+        if not chat_id:
             return
             
         event = payload.get("event")
@@ -61,8 +71,6 @@ class CartNotifier:
                 msg += "❤️ <b>Current Wishlist:</b>\n"
                 conn = get_db_connection()
                 
-                # Try to get cart_id to handle strikethrough logic correctly
-                cart_id = self.app.bot_data.get("cart_id") if self.app else None
                 shopping_ids = []
                 if cart_id:
                      row = conn.execute("SELECT shopping_list FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
@@ -90,19 +98,19 @@ class CartNotifier:
                 msg += "Wishlist is empty."
                 
             asyncio.run_coroutine_threadsafe(
-                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML'),
+                self.app.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML'),
                 event_loop
             )
         elif event == "checkout_complete":
             msg = "✅ <b>Checkout Complete!</b>\nPayment registered successfully. The cart is now free for a new user."
             asyncio.run_coroutine_threadsafe(
-                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
+                self.app.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
                 event_loop
             )
         elif event == "user_disconnected":
             msg = "🔌 <b>User Disconnected</b>\nThe cart has been reset and is ready for a new user."
             asyncio.run_coroutine_threadsafe(
-                self.app.bot.send_message(chat_id=self.chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
+                self.app.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML', reply_markup=MAIN_MENU_KBD),
                 event_loop
             )
 
@@ -140,9 +148,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if event_loop is None:
         event_loop = asyncio.get_running_loop()
     
-    # Store app and chat_id in notifier so it can send messages to this chat
+    # Store app in notifier
     notifier.app = context.application
-    notifier.chat_id = update.effective_chat.id
     
     await update.message.reply_text(
         "🛒 Smart Cart Bot\n\n"
@@ -164,18 +171,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         cart_id = text.strip().upper()
         
         # Subscribe to MQTT
-        old_cart = context.bot_data.get("cart_id")
+        old_cart = context.user_data.get("cart_id")
         if old_cart:
             mqtt_client.myUnsubscribe(f"cart/{old_cart}/data")
+            if old_cart in notifier.cart_to_chat:
+                del notifier.cart_to_chat[old_cart]
             
-        context.bot_data["cart_id"] = cart_id
+        context.user_data["cart_id"] = cart_id
+        notifier.cart_to_chat[cart_id] = update.effective_chat.id
         mqtt_client.mySubscribe(f"cart/{cart_id}/data")
         
         await update.message.reply_text(f"✅ Active Cart set to: {cart_id}", reply_markup=MAIN_MENU_KBD)
         return
 
     if text == "💳 Show Pairing Code":
-        cart_id = context.bot_data.get("cart_id")
+        cart_id = context.user_data.get("cart_id")
         if not cart_id:
             await update.message.reply_text("Cart ID not set! Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
             return
@@ -209,7 +219,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Please use the menu buttons.", reply_markup=MAIN_MENU_KBD)
 
 async def disconnect_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    cart_id = context.bot_data.get("cart_id")
+    cart_id = context.user_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected.", reply_markup=MAIN_MENU_KBD)
         return
@@ -243,7 +253,7 @@ async def disconnect_cart(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def show_wishlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    cart_id = context.bot_data.get("cart_id")
+    cart_id = context.user_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("Cart ID not set. Use 'Set Cart ID' first.", reply_markup=MAIN_MENU_KBD)
         return
@@ -299,7 +309,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     Simulates an RFID scan to add a product to the cart.
     Usage: /scan <RFID_ID>
     """
-    cart_id = context.bot_data.get("cart_id")
+    cart_id = context.user_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
@@ -383,7 +393,7 @@ async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     Simulates removing an item from the cart.
     Usage: /unscan <RFID_ID>
     """
-    cart_id = context.bot_data.get("cart_id")
+    cart_id = context.user_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
@@ -446,7 +456,7 @@ async def unscan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def show_shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    cart_id = context.bot_data.get("cart_id")
+    cart_id = context.user_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected. Use 'Set Cart ID' first.", reply_markup=MAIN_MENU_KBD)
         return
@@ -485,7 +495,7 @@ async def checkout_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     """
     Generates a QR code for checkout that StaffBot can scan.
     """
-    cart_id = context.bot_data.get("cart_id")
+    cart_id = context.user_data.get("cart_id")
     if not cart_id:
         await update.message.reply_text("No cart connected. Use ⚙️ Set Cart ID first.", reply_markup=MAIN_MENU_KBD)
         return
