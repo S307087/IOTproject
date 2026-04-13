@@ -412,7 +412,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
         rec_msg = None
         if best_match:
-            rec_msg = f"💡 <b>Smart Tip:</b> Chi ha comprato questo acquista spesso anche <b>{best_match['product_name']}</b> (lo trovi nello scaffale <code>{best_match['shelf_id']}</code>)!"
+            rec_msg = f"💡 <b>Smart Tip:</b> People who bought this also bought <b>{best_match['product_name']}</b> (find it on shelf <code>{best_match['shelf_id']}</code>)!"
         elif category:
             # 2. Alternative: Promozione stessa categoria
             seq = ','.join(['?'] * len(shopping_list))
@@ -420,7 +420,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             params = [category, product_id] + shopping_list
             promo_item = conn.execute(query, params).fetchone()
             if promo_item:
-                rec_msg = f"🏷️ <b>Offerta per te:</b> Nello scaffale <code>{promo_item['shelf_id']}</code> trovi un prodotto simile: <b>{promo_item['product_name']}</b> in sconto del {promo_item['promotion']}%!"
+                rec_msg = f"🏷️ <b>Special Offer:</b> On shelf <code>{promo_item['shelf_id']}</code> you can find a similar product: <b>{promo_item['product_name']}</b> at {promo_item['promotion']}% off!"
         
         conn.close()
         
