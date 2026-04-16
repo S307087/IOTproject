@@ -350,6 +350,12 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         (cart_id,),
     ).fetchone()
     
+    other_cart = conn.execute("SELECT cart_id FROM carts WHERE scanned_rfids LIKE ? AND cart_id != ?", (f'%"{rfid_id}"%', cart_id)).fetchone()
+    if other_cart:
+        conn.close()
+        await update.message.reply_text(f"❌ This exact item ({rfid_id}) is already in another cart!", reply_markup=MAIN_MENU_KBD)
+        return
+
     scanned_rfids = _load_json_list(cart_row["scanned_rfids"] if cart_row else None)
     if rfid_id in scanned_rfids:
         conn.close()

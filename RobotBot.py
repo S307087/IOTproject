@@ -54,9 +54,8 @@ class RobotBot:
                     return
 
                 with self.lock:
-                    if shelf_id in self.active_restocks:
-                        print(f"[RobotBot] Restock already in progress for shelf {shelf_id}. Ignoring alert.")
-                        return
+                    # Rimosso il controllo su active_restocks su richiesta dell'utente
+                    # per far partire il robot OGNI volta che viene modificato lo stock.
                     
                     # Try to find an available robot
                     conn = get_db_connection()
@@ -87,8 +86,8 @@ class RobotBot:
         conn = get_db_connection()
         try:
             prod = conn.execute(
-                "SELECT p.product_name, p.shelf_stock, p.warehouse_stock, s.max_capacity, s.proportions "
-                "FROM products p LEFT JOIN shelves s ON p.shelf_id = s.shelf_id "
+                "SELECT p.product_name, p.shelf_stock, p.warehouse_stock "
+                "FROM products p "
                 "WHERE p.product_id = ?", (product_id,)
             ).fetchone()
             
@@ -99,18 +98,11 @@ class RobotBot:
             product_name = prod["product_name"]
             shelf_stock = prod["shelf_stock"]
             warehouse_stock = prod["warehouse_stock"]
-            max_capacity = prod["max_capacity"] or 0
             
-            props_str = prod["proportions"]
-            props = {}
-            if props_str:
-                try:
-                    props = json.loads(props_str)
-                except json.JSONDecodeError:
-                    pass
+            count = conn.execute("SELECT COUNT(*) FROM products WHERE shelf_id = ?", (shelf_id,)).fetchone()[0]
+            max_capacity = conn.execute("SELECT max_capacity FROM shelves WHERE shelf_id = ?", (shelf_id,)).fetchone()[0]
             
-            prop = props.get(product_id, 0)
-            max_allowed = int(max_capacity * prop)
+            max_allowed = max_capacity // max(1, count)
             
             items_needed = max_allowed - shelf_stock
             if items_needed <= 0:
@@ -128,7 +120,7 @@ class RobotBot:
             # Generate RFIDs for new items
             new_rfids = [f"RFID-{uuid.uuid4().hex[:8].upper()}" for _ in range(items_to_take)]
             for rfid in new_rfids:
-                conn.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, product_id))
+                conn.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id, status) VALUES (?, ?, 'SH')", (rfid, product_id))
             
             # Update stock in DB
             conn.execute(
@@ -148,9 +140,14 @@ class RobotBot:
             })
             
             # Publish standard notification to staff
+            if items_to_take < items_needed:
+                shortage_msg = f"⚠️ Alert Magazzino: Manca merce in magazzino! Riforniti {items_to_take} ma ne servivano {items_needed}."
+            else:
+                shortage_msg = "✅ Magazzino sufficientemente rifornito."
+                
             self.mqtt_client.myPublish("staff/alerts", {
                 "level": "INFO",
-                "message": f"🤖 Robot {robot_id} has restocked {items_to_take}x {product_name} on shelf {shelf_id}. Shelf is now filled ({new_shelf_stock}/{max_allowed}).",
+                "message": f"🤖 Il Robot {robot_id} ha completato il rifornimento: aggiunto {items_to_take}x {product_name} allo scaffale {shelf_id}. (Nuovo stock scaffale: {new_shelf_stock}/{max_allowed})\n{shortage_msg}",
                 "timestamp": time.time()
             })
             

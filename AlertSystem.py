@@ -42,19 +42,6 @@ class AlertSystem:
             rfid = payload.get("rfid")
             self.process_inventory_update(shelf_id, rfid, action)
             
-        elif event == "low_stock_shelf":
-            # Smart shelf already detected low stock locally, alert system forwards it
-            product_id = payload.get("product_id")
-            current = payload.get("current_stock")
-            thresh = payload.get("threshold")
-            self.publish_staff_alert(
-                level="WARNING",
-                msg=f"Shelf {shelf_id} is running low on {product_id}! (Current: {current}, Min: {thresh})",
-                event="low_stock_shelf",
-                product_id=product_id,
-                shelf_id=shelf_id
-            )
-            
     def process_inventory_update(self, shelf_id, rfid, action):
         print(f"[AlertSystem] Processing {action} for RFID {rfid} from {shelf_id}")
         try:
@@ -84,44 +71,9 @@ class AlertSystem:
                     shelf_stock = prod_info.get("shelf_stock")
                     warehouse_stock = prod_info.get("warehouse_stock")
                     
-                    # 3. Check Safety Thresholds
-                    # Warehouse threshold
-                    WAREHOUSE_MIN = 20 # fixed rule for warehouse
-                    if warehouse_stock < WAREHOUSE_MIN:
-                        self.publish_staff_alert(
-                            level="CRITICAL",
-                            msg=f"Warehouse stock for {product_name} ({product_id}) is low! Only {warehouse_stock} left."
-                        )
-                    
-                    # Shelf threshold (double-checked by Alert System, though smart shelf does it locally too)
-                    self.check_shelf_threshold(shelf_id, product_id, product_name, shelf_stock)
-                    
+                    # Thresholds are now centrally evaluated by StaffBot responding to the `stock_updated` event we just published.
         except Exception as e:
             print(f"[AlertSystem] Error updating catalog or checking thresholds: {e}")
-            
-    def check_shelf_threshold(self, shelf_id, product_id, product_name, shelf_stock):
-        try:
-            prod_req = requests.get(f"{REST_API_URL}/get_product?product_id={product_id}")
-            if prod_req.status_code == 200:
-                prod = prod_req.json()
-                max_cap = prod.get("shelf_max_capacity", 0)
-                props = prod.get("shelf_proportions", {})
-                
-                prop = props.get(product_id, 0)
-                max_allowed = int(max_cap * prop)
-                min_threshold = int(max_allowed * 0.20)
-                if min_threshold == 0 and max_allowed > 0: min_threshold = 1
-                
-                if shelf_stock < min_threshold:
-                     self.publish_staff_alert(
-                        level="WARNING",
-                        msg=f"Shelf {shelf_id} is running low on {product_name}! (Current: {shelf_stock}, Min: {min_threshold})",
-                        event="low_stock_shelf",
-                        product_id=product_id,
-                        shelf_id=shelf_id
-                    )
-        except Exception as e:
-            print(f"[AlertSystem] Error checking shelf thresholds: {e}")
 
     def publish_staff_alert(self, level, msg, event=None, product_id=None, shelf_id=None):
         print(f"[AlertSystem] Emitting Alert: {level} - {msg}")
