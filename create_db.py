@@ -21,7 +21,8 @@ def create_schema(conn):
             shelf_id TEXT,
             shelf_stock INTEGER DEFAULT 0,
             warehouse_stock INTEGER DEFAULT 0,
-            category TEXT
+            category TEXT,
+            min_threshold INTEGER DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS carts (
@@ -64,7 +65,8 @@ def create_schema(conn):
 
         CREATE TABLE IF NOT EXISTS rfid_tags (
             rfid_id TEXT PRIMARY KEY,
-            product_id TEXT
+            product_id TEXT,
+            status TEXT DEFAULT 'SH'
         );
 
         CREATE TABLE IF NOT EXISTS temperatures (
@@ -142,9 +144,11 @@ def seed_products(conn):
             shelf_product_ids = [p["product_id"] for p in chunk]
             max_capacity = sum(p["shelf_stock"] for p in chunk) + random.randint(10, 50)
             
-            # Calcola proportions in base alla quantità
-            total_stock = sum(p["shelf_stock"] for p in chunk)
-            proportions = {p["product_id"]: round(p["shelf_stock"] / total_stock, 2) for p in chunk}
+            # 20% of equally distributed capacity
+            max_allocation = max_capacity // max(1, len(chunk))
+            min_threshold = int(max_allocation * 0.20)
+            if min_threshold == 0 and max_allocation > 0:
+                min_threshold = 1
             
             SHELVES_CONFIG.append({
                 "shelf_id": shelf_id,
@@ -152,17 +156,18 @@ def seed_products(conn):
                 "temperature": -18.0 if category == "Frozen Food" else (4.0 if category in ["Meat & Poultry", "Dairy"] else 20.0),
                 "product_ids": json.dumps(shelf_product_ids),
                 "max_capacity": max_capacity,
-                "proportions": json.dumps(proportions)
+                "proportions": "{}"
             })
             
-            # Update product dict with generated shelf_id
+            # Update product dict with generated shelf_id and min_threshold
             for p in chunk:
                 p["shelf_id"] = shelf_id
+                p["min_threshold"] = min_threshold
 
     for p in ALL_PRODUCTS:
         products_data.append((
             p["product_id"], p["product_name"], p["price"], p["promotion"],
-            p["shelf_id"], p["shelf_stock"], p["warehouse_stock"], p["category"]
+            p["shelf_id"], p["shelf_stock"], p["warehouse_stock"], p["category"], p["min_threshold"]
         ))
         
         for _ in range(p["shelf_stock"]):
@@ -173,8 +178,8 @@ def seed_products(conn):
         '''
         INSERT OR REPLACE INTO products (
             product_id, product_name, price, promotion,
-            shelf_id, shelf_stock, warehouse_stock, category
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            shelf_id, shelf_stock, warehouse_stock, category, min_threshold
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', products_data
     )
     conn.executemany(

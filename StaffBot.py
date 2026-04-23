@@ -301,25 +301,12 @@ async def show_active_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(msg_text[:4000], parse_mode='Markdown')
 
 def check_and_remove_alerts(pid, new_shelf_stock, new_warehouse_stock, conn):
-    prod = conn.execute("SELECT p.product_name, p.shelf_id, s.max_capacity, s.proportions FROM products p LEFT JOIN shelves s ON p.shelf_id = s.shelf_id WHERE p.product_id = ?", (pid,)).fetchone()
+    prod = conn.execute("SELECT product_name, shelf_id, min_threshold FROM products WHERE product_id = ?", (pid,)).fetchone()
     if not prod: return
     
     product_name = prod["product_name"]
-    
-    max_cap = prod["max_capacity"] or 0
-    props_str = prod["proportions"]
-    props = {}
-    if props_str:
-        try:
-            props = json.loads(props_str)
-        except json.JSONDecodeError:
-            pass
-            
-    prop = props.get(pid, 0)
-    max_allowed = int(max_cap * prop)
-    min_threshold = int(max_allowed * 0.20)
-    if min_threshold == 0 and max_allowed > 0: 
-        min_threshold = 1
+    shelf_id = prod["shelf_id"]
+    min_threshold = prod["min_threshold"]
     
     new_history = []
     for alert in notifier.alert_history:
@@ -339,6 +326,23 @@ def check_and_remove_alerts(pid, new_shelf_stock, new_warehouse_stock, conn):
             new_history.append(alert)
             
     notifier.alert_history = new_history
+    
+    import time
+    if new_shelf_stock < min_threshold:
+        mqtt_client.myPublish("staff/alerts", {
+            "level": "WARNING",
+            "message": f"Shelf {shelf_id} is running low on {product_name}! (Current: {new_shelf_stock}, Min: {min_threshold})",
+            "event": "low_stock_shelf",
+            "product_id": pid,
+            "shelf_id": shelf_id,
+            "timestamp": time.time()
+        })
+    if new_warehouse_stock < 20:
+        mqtt_client.myPublish("staff/alerts", {
+            "level": "CRITICAL",
+            "message": f"Warehouse stock for {product_name} ({pid}) is low! Only {new_warehouse_stock} left.",
+            "timestamp": time.time()
+        })
 
 async def browse_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     conn = get_db_connection()
@@ -557,8 +561,12 @@ async def edit_stock_warehouse(update: Update, context: ContextTypes.DEFAULT_TYP
             import uuid
             new_rfids = [f"RFID-{uuid.uuid4().hex[:8].upper()}" for _ in range(diff)]
             for rfid in new_rfids:
-                conn.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, pid))
+                conn.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id, status) VALUES (?, ?, 'SH')", (rfid, pid))
             msg_extra = f"\nGenerated {diff} new RFIDs."
+        elif diff < 0:
+            remove_count = abs(diff)
+            conn.execute("DELETE FROM rfid_tags WHERE rfid_id IN (SELECT rfid_id FROM rfid_tags WHERE product_id = ? LIMIT ?)", (pid, remove_count))
+            msg_extra = f"\nRemoved {remove_count} RFIDs."
 
         conn.execute('UPDATE products SET shelf_stock = ?, warehouse_stock = ? WHERE product_id = ?', (shelf, warehouse, pid))
         check_and_remove_alerts(pid, shelf, warehouse, conn)
@@ -730,8 +738,12 @@ async def update_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             import uuid
             new_rfids = [f"RFID-{uuid.uuid4().hex[:8].upper()}" for _ in range(diff)]
             for rfid in new_rfids:
-                cursor.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id) VALUES (?, ?)", (rfid, pid))
+                cursor.execute("INSERT OR REPLACE INTO rfid_tags (rfid_id, product_id, status) VALUES (?, ?, 'SH')", (rfid, pid))
             msg_extra = f" (+{diff} RFIDs)"
+        elif diff < 0:
+            remove_count = abs(diff)
+            cursor.execute("DELETE FROM rfid_tags WHERE rfid_id IN (SELECT rfid_id FROM rfid_tags WHERE product_id = ? LIMIT ?)", (pid, remove_count))
+            msg_extra = f" (-{remove_count} RFIDs)"
 
         cursor.execute('UPDATE products SET shelf_stock = ?, warehouse_stock = ? WHERE product_id = ?', (shelf, warehouse, pid))
         check_and_remove_alerts(pid, shelf, warehouse, conn)

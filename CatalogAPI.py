@@ -62,19 +62,26 @@ class CatalogAPI(object):
         conn = get_db()
         cursor = conn.cursor()
         
-        # 1. Identity product
-        tag = cursor.execute("SELECT product_id FROM rfid_tags WHERE rfid_id = ?", (rfid,)).fetchone()
+        # 1. Identity product and current status
+        tag = cursor.execute("SELECT product_id, status FROM rfid_tags WHERE rfid_id = ?", (rfid,)).fetchone()
         if not tag:
             conn.close()
             raise cherrypy.HTTPError(404, f"RFID {rfid} not found in database")
             
         product_id = tag["product_id"]
+        current_status = tag["status"]
         
-        if action == "removed":
-            # Remove from shelf_stock
+        if action == "removed" and current_status == 'SH':
+            # Move from Shelf to Cart/User
             cursor.execute("UPDATE products SET shelf_stock = max(0, shelf_stock - 1) WHERE product_id = ?", (product_id,))
-        elif action == "added":
+            cursor.execute("UPDATE rfid_tags SET status = 'CA' WHERE rfid_id = ?", (rfid,))
+        elif action == "added" and current_status == 'CA':
+            # Move back from Cart to Shelf
             cursor.execute("UPDATE products SET shelf_stock = shelf_stock + 1 WHERE product_id = ?", (product_id,))
+            cursor.execute("UPDATE rfid_tags SET status = 'SH' WHERE rfid_id = ?", (rfid,))
+        else:
+            # Already in desired state, no-op (idempotent)
+            print(f"[CatalogAPI] RFID {rfid} already in state {action}. No changes made.")
             
         conn.commit()
         # return new state   

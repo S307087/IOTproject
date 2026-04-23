@@ -114,6 +114,7 @@ class SmartShelf:
             if r.status_code == 200:
                 prod = r.json()
                 product_id = prod["product_id"]
+                min_threshold = prod.get("min_threshold", 1)
                 
                 # Update local counts
                 if product_id not in self.product_counts:
@@ -135,27 +136,14 @@ class SmartShelf:
                 self.mqtt_client.myPublish(f"shelf/{self.shelf_id}/events", event_payload)
                 
                 # Check low stock thresholds locally
-                self.check_local_threshold(product_id)
+                self.check_local_threshold(product_id, min_threshold)
                 
             else:
                 print(f"[{self.shelf_id}] Warning: Unknown RFID {rfid} ({action})")
         except Exception as e:
             print(f"[{self.shelf_id}] Error accessing REST API: {e}")
             
-    def check_local_threshold(self, product_id):
-        if self.max_capacity <= 0: return
-        
-        prop = self.proportions.get(product_id, 0.0)
-        # Calculate max allowed for this specific product
-        max_allowed = int(self.max_capacity * prop)
-        
-        # 20% minimum threshold dynamically
-        min_threshold = int(max_allowed * 0.20)
-        
-        # If min_threshold is 0, we default to 1 so we get alerts for items that reach 0
-        if min_threshold == 0 and max_allowed > 0:
-            min_threshold = 1
-            
+    def check_local_threshold(self, product_id, min_threshold):
         current = self.product_counts.get(product_id, 0)
         
         if current < min_threshold:

@@ -273,10 +273,16 @@ async def perform_pairing(cart_id: str, update: Update, context: ContextTypes.DE
     user_id = f"USR-{update.effective_user.id}"
     
     conn = get_db_connection()
-    cart = conn.execute("SELECT cart_id FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
+    cart = conn.execute("SELECT cart_id, user_id FROM carts WHERE cart_id = ?", (cart_id,)).fetchone()
     if not cart:
         conn.close()
         await update.message.reply_text(f"❌ Invalid Cart Pairing Code: <b>{cart_id}</b>\nPlease try again or use the menu.", parse_mode='HTML', reply_markup=MAIN_MENU_KBD)
+        context.user_data['awaiting_cart_id'] = False
+        return
+        
+    if cart['user_id'] and cart['user_id'] != user_id:
+        conn.close()
+        await update.message.reply_text(f"❌ Cart <b>{cart_id}</b> is already connected to another user.", parse_mode='HTML', reply_markup=MAIN_MENU_KBD)
         context.user_data['awaiting_cart_id'] = False
         return
         
