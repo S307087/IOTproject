@@ -67,7 +67,7 @@ class MyMQTT:
                 self.notifier.notify(msg.topic, payload)
 
         except Exception as e:
-            # Gestione errore nella ricezione
+            # Error handling on receive
             print(f"[{self.service_name}] Error while processing received message: {e}")
 
     def myPublish(self, topic, msg, qos=1, retain=False):
@@ -84,7 +84,7 @@ class MyMQTT:
             self._paho_mqtt.publish(topic, msg, qos=qos, retain=retain)
 
         except Exception as e:
-            # Gestione errore nella pubblicazione
+            # Error handling on publish
             print(f"[{self.service_name}] Publish error: {e}")
 
     def mySubscribe(self, topic, qos=1):

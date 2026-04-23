@@ -21,19 +21,19 @@ def run_local_analytics():
     print("=" * 60)
     
     if not os.path.exists(DB_PATH):
-        print("Database non trovato! Devi avere catalog.db nella stessa cartella.")
+        print("Database not found! catalog.db must be in the same directory.")
         return
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Preleviamo tutte le transazioni storiche
-    # (Oppure potremmo aggiungere "WHERE date(timestamp) = date('now')" per la tabella giornaliera)
+    # Fetch all historical transactions
+    # (Or we could add "WHERE date(timestamp) = date('now')" for the daily table)
     transactions = cursor.execute("SELECT * FROM transactions").fetchall()
     
     if not transactions:
-        print("Nessuna transazione trovata nel database.")
+        print("No transactions found in the database.")
         conn.close()
         return
 
@@ -42,10 +42,10 @@ def run_local_analytics():
     total_items = 0
     total_dwell_time = 0
     
-    product_performance = {} # Conta vendite per ID prodotto
-    pair_performance = {} # Conta vendite abbinate (Market Basket)
+    product_performance = {} # Count sales per product ID
+    pair_performance = {} # Count paired sales (Market Basket)
     
-    # 4 Fasce orarie (8-11, 11-14, 14-17, 17-20) come richiesto
+    # 4 Time slots (8-11, 11-14, 14-17, 17-20) as requested
     time_slots = {
         "08:00 - 11:00": 0,
         "11:00 - 14:00": 0,
@@ -57,14 +57,14 @@ def run_local_analytics():
         total_revenue += tx['total_amount']
         total_dwell_time += tx['dwell_time_seconds']
         
-        # 1. Calcolo Performance Singoli Prodotti
+        # 1. Single Products Performance Calculation
         try:
             items = json.loads(tx['product_list'])
             total_items += len(items)
             for item in items:
                 product_performance[item] = product_performance.get(item, 0) + 1
             
-            # Market Basket Analysis (Algoritmo di associazione per coppie frequenti)
+            # Market Basket Analysis (Association algorithm for frequent pairs)
             unique_items = list(set(items))
             for i in range(len(unique_items)):
                 for j in range(i + 1, len(unique_items)):
@@ -73,7 +73,7 @@ def run_local_analytics():
         except Exception:
             pass
             
-        # 2. Suddivisione transazioni per Fasce Orarie
+        # 2. Transaction split by Time Slots
         if 'timestamp' in tx.keys() and tx['timestamp']:
             try:
                 ts = datetime.datetime.fromisoformat(tx['timestamp'])
@@ -88,34 +88,34 @@ def run_local_analytics():
 
     avg_revenue = total_revenue / total_transactions if total_transactions else 0
     
-    print("\n--- 1. TABELLA RIASSUNTIVA AZIENDALE ---")
-    print(f"Numero Transazioni: {total_transactions}")
-    print(f"Totale Articoli Venduti: {total_items}")
-    print(f"Ricavo Totale: €{total_revenue:.2f}")
-    print(f"Ricavo Medio per Transazione: €{avg_revenue:.2f}")
+    print("\n--- 1. COMPANY SUMMARY TABLE ---")
+    print(f"Number of Transactions: {total_transactions}")
+    print(f"Total Items Sold: {total_items}")
+    print(f"Total Revenue: €{total_revenue:.2f}")
+    print(f"Avg Revenue per Transaction: €{avg_revenue:.2f}")
 
-    print("\n--- 2. PERFORMANCE SINGOLI PRODOTTI (TOP 5) ---")
+    print("\n--- 2. INDIVIDUAL PRODUCT PERFORMANCE (TOP 5) ---")
     sorted_products = sorted(product_performance.items(), key=lambda x: x[1], reverse=True)
-    # Raccogliamo anche i nomi dei prodotti con una query
+    # We also fetch product names with a query
     for i, (pid, count) in enumerate(sorted_products[:5]):
         p_row = cursor.execute("SELECT product_name FROM products WHERE product_id=?", (pid,)).fetchone()
-        name = p_row['product_name'] if p_row else "Nome Sconosciuto"
-        print(f" {i+1}. {name} [{pid}] -> Venduti: {count}")
+        name = p_row['product_name'] if p_row else "Unknown Name"
+        print(f" {i+1}. {name} [{pid}] -> Sold: {count}")
 
-    print("\n--- 3. MEDIA PERMANENZA E SPESE ---")
-    # Total dwell time è in secondi
+    print("\n--- 3. AVERAGE DWELL TIME AND EXPENSES ---")
+    # Total dwell time is in seconds
     avg_dwell_sec = total_dwell_time / total_transactions if total_transactions else 0
     avg_dwell_min = avg_dwell_sec / 60.0
     eur_per_min = avg_revenue / avg_dwell_min if avg_dwell_min > 0 else 0
     
-    print(f"Permanenza Media nel Supermercato: {avg_dwell_min:.1f} minuti")
-    print(f"Media Euro spesi al minuto: €{eur_per_min:.2f} / minuto (per utente)")
+    print(f"Average Supermarket Dwell Time: {avg_dwell_min:.1f} minutes")
+    print(f"Average Euros spent per minute: €{eur_per_min:.2f} / minuto (per user)")
 
-    print("\n--- 4. AFFLUENZA ORARIA (Acquirenti) ---")
+    print("\n--- 4. HOURLY FOOTFALL (Buyers) ---")
     for slot, count in time_slots.items():
-        print(f"Fascia {slot} -> {count} acquirenti")
+        print(f"Slot {slot} -> {count} buyers")
 
-    print("\n--- 5. MARKET BASKET ANALYSIS (Top 5 Abbinamenti) ---")
+    print("\n--- 5. MARKET BASKET ANALYSIS (Top 5 Pairings) ---")
     sorted_pairs = sorted(pair_performance.items(), key=lambda x: x[1], reverse=True)
     top_pairs_names = []
     top_pairs_counts = []
@@ -124,20 +124,20 @@ def run_local_analytics():
         for i, (pair, count) in enumerate(sorted_pairs[:5]):
             p1_row = cursor.execute("SELECT product_name FROM products WHERE product_id=?", (pair[0],)).fetchone()
             p2_row = cursor.execute("SELECT product_name FROM products WHERE product_id=?", (pair[1],)).fetchone()
-            name1 = p1_row['product_name'] if p1_row else "Sconosciuto"
-            name2 = p2_row['product_name'] if p2_row else "Sconosciuto"
+            name1 = p1_row['product_name'] if p1_row else "Unknown"
+            name2 = p2_row['product_name'] if p2_row else "Unknown"
             combo_name = f"{name1} + {name2}"
             top_pairs_names.append(combo_name)
             top_pairs_counts.append(count)
-            print(f" {i+1}. {combo_name} -> Comprati insieme {count} volte")
+            print(f" {i+1}. {combo_name} -> Bought together {count} times")
     else:
-        print(" Nessuna correlazione trovata negli acquisti passati.")
+        print(" No correlation found in past purchases.")
 
     top_product_names = []
     top_product_counts = []
     for (pid, count) in sorted_products[:5]:
         p_row = cursor.execute("SELECT product_name FROM products WHERE product_id=?", (pid,)).fetchone()
-        name = p_row['product_name'] if p_row else "Nome Sconosciuto"
+        name = p_row['product_name'] if p_row else "Unknown Name"
         top_product_names.append(name)
         top_product_counts.append(count)
 
@@ -400,7 +400,7 @@ def run_local_analytics():
     with open("dashboard.html", "w", encoding="utf-8") as f:
         f.write(html_content)
         
-    print("\n[+] Dashboard UI esportata in 'dashboard.html'!")
+    print("\n[+] Dashboard UI exported to 'dashboard.html'!")
     
     try:
         import webbrowser
@@ -416,12 +416,12 @@ def run_thingspeak_analytics():
     print("=" * 60)
     
     if THINGSPEAK_CHANNEL_ID == "YOUR_CHANNEL_ID":
-        print("! Salto le Analytics Storiche su ThingSpeak.")
-        print("NOTA PER IL PROGETTO: Inserisci il TUO Channel ID dentro AnalyticsBot.py per abilitare il modulo.")
-        print("In questo modo dimostrerete al professore di utilizzare l'API REST per pre-processare lo storico.")
+        print("! Skipping Historical Analytics on ThingSpeak.")
+        print("PROJECT NOTE: Insert YOUR Channel ID inside AnalyticsBot.py to enable the module.")
+        print("This will demonstrate the use of REST API to pre-process the history.")
         return
         
-    print(f"Scaricando i dati storici dal Canale ThingSpeak {THINGSPEAK_CHANNEL_ID}...")
+    print(f"Downloading historical data from ThingSpeak Channel {THINGSPEAK_CHANNEL_ID}...")
     try:
         # Preleva gli ultimi X record (results=1000) tramite API Rest di MathWorks
         url = f"https://api.thingspeak.com/channels/{THINGSPEAK_CHANNEL_ID}/feeds.json?results=1000"
@@ -432,15 +432,15 @@ def run_thingspeak_analytics():
         if r.status_code == 200:
             data = r.json()
             feeds = data.get("feeds", [])
-            print(f"Successo: Prelevati {len(feeds)} pacchetti storici dal sensore IoT.")
+            print(f"Success: Fetched {len(feeds)} historical packets from IoT sensor.")
             
             if not feeds:
-                print("Nessun dato storico trovato.")
+                print("No historical data found.")
                 return
                 
-            # Requisito del Professore: Calcolo complesso / Pre-processing sui dati ThingSpeak
-            # Calcoliamo la "Zona più Calda storica" sommando le interazioni passate dei Field 1-7 (Heatmap)
-            # e calcolando la Deviazione delle zone.
+            # Professor Requirement: Complex calculation / Pre-processing on ThingSpeak data
+            # Calculate the "Historical Hottest Zone" by summing past interactions of Fields 1-7 (Heatmap)
+            # and calculating the Zone Deviation.
             zone_totals = {}
             for feed in feeds:
                 for i in range(1, 8):
@@ -453,21 +453,21 @@ def run_thingspeak_analytics():
                             pass
                             
             if not zone_totals:
-                print("Campi 1-7 vuoti (Heatmap non ancora popolata in ThingSpeak).")
+                print("Fields 1-7 empty (Heatmap not yet populated in ThingSpeak).")
                 return
                 
-            print("\n--- ANALISI CORRELAZIONE REPARTI (da Dati Storici Cloud) ---")
+            print("\n--- DEPARTMENT CORRELATION ANALYSIS (from Cloud Historical Data) ---")
             sorted_zones = sorted(zone_totals.items(), key=lambda x: x[1], reverse=True)
             for z, total in sorted_zones:
-                print(f" {z}: {int(total)} interazioni fisiche rilevate.")
+                print(f" {z}: {int(total)} physical interactions detected.")
                 
-            print("\n[V] Pre-processing completato: il sistema ha correlato con successo lo storico!")
+            print("\n[V] Pre-processing completed: the system has successfully correlated the history!")
             
         else:
-            print(f"Errore REST API ThingSpeak: HTTP {r.status_code}")
+            print(f"ThingSpeak REST API Error: HTTP {r.status_code}")
             
     except Exception as e:
-        print(f"Chiamata a ThingSpeak fallita: {e}")
+        print(f"ThingSpeak call failed: {e}")
 
 if __name__ == "__main__":
     run_local_analytics()

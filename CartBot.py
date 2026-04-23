@@ -570,7 +570,7 @@ async def checkout_qr(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_photo(
         photo=qr_url, 
         caption=(
-            f"🏁 <b>Checkout per Cart: {cart_id}</b>\n\n"
+            f"🏁 <b>Checkout for Cart: {cart_id}</b>\n\n"
             f"Show this QR code to the Staff to complete the payment and finish shopping.\n"
             
         ), 

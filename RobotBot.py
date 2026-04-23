@@ -54,8 +54,8 @@ class RobotBot:
                     return
 
                 with self.lock:
-                    # Rimosso il controllo su active_restocks su richiesta dell'utente
-                    # per far partire il robot OGNI volta che viene modificato lo stock.
+                    # Removed the active_restocks check to ensure the robot
+                    # starts EVERY time the stock is modified.
                     
                     # Try to find an available robot
                     conn = get_db_connection()
@@ -141,13 +141,13 @@ class RobotBot:
             
             # Publish standard notification to staff
             if items_to_take < items_needed:
-                shortage_msg = f"⚠️ Alert Magazzino: Manca merce in magazzino! Riforniti {items_to_take} ma ne servivano {items_needed}."
+                shortage_msg = f"⚠️ Warehouse Alert: Not enough items in warehouse! Restocked {items_to_take} but needed {items_needed}."
             else:
-                shortage_msg = "✅ Magazzino sufficientemente rifornito."
+                shortage_msg = "✅ Warehouse sufficiently stocked."
                 
             self.mqtt_client.myPublish("staff/alerts", {
                 "level": "INFO",
-                "message": f"🤖 Il Robot {robot_id} ha completato il rifornimento: aggiunto {items_to_take}x {product_name} allo scaffale {shelf_id}. (Nuovo stock scaffale: {new_shelf_stock}/{max_allowed})\n{shortage_msg}",
+                "message": f"🤖 Robot {robot_id} completed restocking: added {items_to_take}x {product_name} to shelf {shelf_id}. (New shelf stock: {new_shelf_stock}/{max_allowed})\n{shortage_msg}",
                 "timestamp": time.time()
             })
             

@@ -135,7 +135,7 @@ def seed_products(conn):
         if category == "Fruit and Vegetables":
             cat_prefix = "FR"
             
-        # Generiamo N scaffali per ogni categoria (max 4 prodotti diversi per scaffale o similar)
+        # Generate N shelves for each category (max 4 different products per shelf)
         chunk_size = 4
         for i in range(0, len(prods), chunk_size):
             chunk = prods[i:i+chunk_size]

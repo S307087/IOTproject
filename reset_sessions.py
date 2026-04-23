@@ -69,7 +69,7 @@ def reset_sessions():
         print(f"RFID tags allineati (aggiunti: {tags_added}, rimossi: {tags_removed})")
         
     except sqlite3.Error as e:
-        print(f"Errore durante la pulizia del database: {e}")
+        print(f"Error cleaning the database: {e}")
     finally:
         if conn:
             conn.close()

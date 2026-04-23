@@ -114,5 +114,33 @@ services:
       - catalog_api
     restart: unless-stopped
 
+  raspberry_connector:
+    build: .
+    command: python RaspberryPiConnector.py
+    volumes:
+      - .:/app
+    environment:
+      - TZ=Europe/Rome
+      - MQTT_BROKER_HOST=mosquitto
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  thingspeak_adaptor:
+    build: .
+    command: python ThingSpeakAdaptor.py
+    volumes:
+      - .:/app
+    environment:
+      - TZ=Europe/Rome
+      - MQTT_BROKER_HOST=mosquitto
+    ports:
+      - "8082:8082"
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
 volumes:
   node_red_data:
