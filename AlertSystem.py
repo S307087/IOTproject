@@ -55,6 +55,26 @@ class AlertSystem:
                 shelf_id=shelf_id
             )
             
+        elif event == "temperature_reading":
+            temp = payload.get("temperature")
+            self.check_temperature(shelf_id, temp)
+            
+    def check_temperature(self, shelf_id, temp):
+        try:
+            r = requests.get(f"{REST_API_URL}/get_shelf?shelf_id={shelf_id}")
+            if r.status_code == 200:
+                shelf_info = r.json()
+                threshold = shelf_info.get("temperature_threshold")
+                if threshold is not None and temp > threshold:
+                    self.publish_staff_alert(
+                        level="CRITICAL",
+                        msg=f"Temperature in {shelf_id} is too high! Current: {temp}°C, Max Allowed: {threshold}°C",
+                        event="high_temperature",
+                        shelf_id=shelf_id
+                    )
+        except Exception as e:
+            print(f"[AlertSystem] Error checking temperature threshold: {e}")
+            
     def process_inventory_update(self, shelf_id, rfid, action):
         print(f"[AlertSystem] Processing {action} for RFID {rfid} from {shelf_id}")
         try:
