@@ -66,6 +66,13 @@ def create_schema(conn):
             rfid_id TEXT PRIMARY KEY,
             product_id TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS temperatures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shelf_id TEXT,
+            temperature REAL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
         '''
     )
 

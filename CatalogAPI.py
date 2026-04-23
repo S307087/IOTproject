@@ -2,9 +2,13 @@ import cherrypy
 import sqlite3
 import json
 import os
+from smartmarket_MQTT import MyMQTT
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILENAME = os.path.join(BASE_DIR, 'catalog.db')
+BROKER = os.environ.get("MQTT_BROKER_HOST", "localhost")
+
+mqtt_client = MyMQTT("CatalogAPIClient", BROKER, 1883)
 
 def get_db():
     conn = sqlite3.connect(DB_FILENAME)
@@ -108,6 +112,50 @@ class CatalogAPI(object):
         raise cherrypy.HTTPError(404, "Product not found")
 
     @cherrypy.expose
+    @cherrypy.tools.json_in()
+    @cherrypy.tools.json_out()
+    def log_temperature(self):
+        if cherrypy.request.method != 'POST':
+            raise cherrypy.HTTPError(405)
+        
+        data = cherrypy.request.json
+        shelf_id = data.get("shelf_id")
+        temp = data.get("temperature")
+        
+        if shelf_id is None or temp is None:
+            raise cherrypy.HTTPError(400, "Missing shelf_id or temperature")
+            
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS temperatures (id INTEGER PRIMARY KEY AUTOINCREMENT, shelf_id TEXT, temperature REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        cursor.execute("INSERT INTO temperatures (shelf_id, temperature) VALUES (?, ?)", (shelf_id, temp))
+        conn.commit()
+        
+        # Publish MQTT event so AlertSystem can check the temperature threshold
+        mqtt_client.myPublish(f"shelf/{shelf_id}/events", {
+            "event": "temperature_reading",
+            "shelf_id": shelf_id,
+            "temperature": temp
+        })
+        
+        conn.close()
+        print(f"[CatalogAPI] Logged temperature {temp}\u00b0C for shelf {shelf_id}")
+        return {"status": "success", "message": f"Temperature {temp} logged"}
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def get_shelf(self, shelf_id=None):
+        """ Returns shelf info including temperature_threshold. Used by AlertSystem. """
+        if not shelf_id:
+            raise cherrypy.HTTPError(400, "Missing shelf_id")
+        conn = get_db()
+        shelf = conn.execute("SELECT * FROM shelves WHERE shelf_id = ?", (shelf_id,)).fetchone()
+        conn.close()
+        if shelf:
+            return dict(shelf)
+        raise cherrypy.HTTPError(404, "Shelf not found")
+
+    @cherrypy.expose
     @cherrypy.tools.json_out()
     def get_product(self, product_id=None):
         if not product_id:
@@ -146,5 +194,6 @@ if __name__ == '__main__':
         }
     }
     
+    mqtt_client.start()
     print("Starting Market Catalog REST API on port 8080...")
     cherrypy.quickstart(CatalogAPI(), '/', conf)

@@ -24,6 +24,7 @@ services:
       - .:/app
     environment:
       - TZ=Europe/Rome
+      - MQTT_BROKER_HOST=mosquitto
     ports:
       - "8080:8080"
     restart: unless-stopped

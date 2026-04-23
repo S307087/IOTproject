@@ -1,0 +1,68 @@
+import adafruit_dht
+import board
+import time
+import requests
+
+# Catalog Configuration (REST API)
+# Using IPv6 because the Raspberry connects to the PC via IPv6 (IPv4 not reachable)
+CATALOG_URL = "http://[2001:b07:647a:5874:56d2:15e6:b053:64a1]:8080"
+SHELF_ID = "S-FR-1"          # Raspberry Shelf ID - change if needed
+INTERVAL = 5.0              # Seconds between readings
+
+print(f"Connecting to Catalog API at: {CATALOG_URL}")
+print("NOTE: If you see 'Unable to set line X to input', run:")
+print("  sudo apt-get install libgpiod2 -y")
+print("  sudo python3 dht_nuovo.py")
+print()
+
+# DHT11 Sensor initialization on GPIO4
+try:
+    sensor = adafruit_dht.DHT11(board.D4)
+    print("DHT11 Sensor initialized on GPIO4 (D4 pin)")
+except Exception as e:
+    print(f"ERROR initializing sensor: {e}")
+    print("Check: 1) Is the sensor connected correctly to GPIO4?")
+    print("       2) Are you running the script with sudo?")
+    exit(1)
+
+def send_to_catalog(temp):
+    try:
+        payload = {
+            "shelf_id": SHELF_ID,
+            "temperature": temp
+        }
+        response = requests.post(f"{CATALOG_URL}/log_temperature", json=payload, timeout=5)
+        
+        if response.status_code == 200:
+            print(f"[OK] {temp}°C saved to Catalog for shelf {SHELF_ID}")
+        else:
+            print(f"[API ERROR] Status {response.status_code}: {response.text}")
+            
+    except requests.exceptions.ConnectionError:
+        print(f"[ERROR] Could not connect to {CATALOG_URL} - Is the server running?")
+    except requests.exceptions.Timeout:
+        print(f"[ERROR] Timeout - Server did not respond within 5 seconds")
+    except Exception as e:
+        print(f"[ERROR] {e}")
+
+print(f"Starting DHT11 monitoring for {SHELF_ID} (every {INTERVAL}s)...")
+while True:
+    try:
+        temperature_c = sensor.temperature
+        
+        if temperature_c is not None:
+            send_to_catalog(temperature_c)
+        else:
+            print("[WARN] Null reading from sensor, retrying...")
+        
+    except RuntimeError as error:
+        # Transitory reading errors are normal with DHT11
+        print(f"[WARN] Sensor reading error (normal, retrying): {error.args[0]}")
+        time.sleep(2.0)
+        continue
+    except Exception as error:
+        print(f"[CRITICAL] Unexpected error: {error}")
+        sensor.exit()
+        raise error
+
+    time.sleep(INTERVAL)

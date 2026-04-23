@@ -54,7 +54,49 @@ class AlertSystem:
                 product_id=product_id,
                 shelf_id=shelf_id
             )
+        
+        elif event == "temperature_reading":
+            # Raspberry Pi sent a new temperature reading, check it vs the expected threshold
+            temperature = payload.get("temperature")
+            if temperature is not None:
+                self.check_temperature_threshold(shelf_id, temperature)
             
+    def check_temperature_threshold(self, shelf_id, temperature):
+        """ Checks if the measured temperature is within ±2°C of the expected shelf threshold. """
+        print(f"[AlertSystem] Checking temperature for {shelf_id}: {temperature}°C")
+        try:
+            shelf_req = requests.get(f"{REST_API_URL}/get_shelf?shelf_id={shelf_id}")
+            if shelf_req.status_code != 200:
+                print(f"[AlertSystem] Could not fetch shelf {shelf_id}: HTTP {shelf_req.status_code}")
+                return
+            
+            shelf_info = shelf_req.json()
+            expected = shelf_info.get("temperature_threshold")
+            
+            if expected is None:
+                print(f"[AlertSystem] No temperature_threshold defined for shelf {shelf_id}, skipping.")
+                return
+            
+            diff = temperature - expected
+            if abs(diff) > 2:
+                direction = "HIGH" if diff > 0 else "LOW"
+                level = "CRITICAL" if abs(diff) > 5 else "WARNING"
+                self.publish_staff_alert(
+                    level=level,
+                    msg=(
+                        f"🌡️ Temperature anomaly on shelf {shelf_id}! "
+                        f"Measured: {temperature:.1f}°C — Expected: {expected:.1f}°C "
+                        f"(difference: {abs(diff):.1f}°C, too {direction})"
+                    ),
+                    event="temperature_alert",
+                    shelf_id=shelf_id
+                )
+            else:
+                print(f"[AlertSystem] Temperature OK on {shelf_id}: {temperature:.1f}°C (expected {expected:.1f}°C, diff {diff:+.1f}°C)")
+                
+        except Exception as e:
+            print(f"[AlertSystem] Error checking temperature threshold: {e}")
+
     def process_inventory_update(self, shelf_id, rfid, action):
         print(f"[AlertSystem] Processing {action} for RFID {rfid} from {shelf_id}")
         try:
